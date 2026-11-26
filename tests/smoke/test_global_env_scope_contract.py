@@ -102,6 +102,16 @@ class TenantContainersDoNotReceiveTheGlobalEnvTest(unittest.TestCase):
             "GOTRUE_MAILER_EXTERNAL_HOSTS: ${GOTRUE_MAILER_EXTERNAL_HOSTS}", auth
         )
 
+        api_compose = read("servidor/docker-compose-api.yml")
+        for service in ("control-plane-migrations", "projects-api"):
+            block = service_block(api_compose, service)
+            self.assertNotIn(".env", env_file_entries(block))
+            self.assertIn(
+                "STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}",
+                block,
+                f"{service} deve propagar STORAGE_S3_REGION sem montar .env global",
+            )
+
     def test_no_control_plane_secret_is_declared_for_a_tenant_service(self) -> None:
         for service in ("auth", "rest"):
             block = service_block(self.template, service)

@@ -6,7 +6,7 @@ for _, name in ipairs({
     "cache/invalidate_service_key", "project_context/project_ref_resolver",
     "project_context/studio_context", "proxy_rewrites/pg_meta", "security/get_service_key",
     "security/internal_hmac", "security/pg_meta_access", "security/projects_api_signer",
-    "security/step_up_authenticate",
+    "security/step_up_authenticate", "security/studio_s3_keys_access",
 }) do
     assert(loadfile(root .. "/" .. name .. ".lua"))
 end
@@ -41,6 +41,7 @@ error_log /tmp/studio-ref/error.log warn;
 env SERVER_DOMAIN;
 env STUDIO_GATEWAY_HMAC_SECRET;
 env PROJECTS_API_HMAC_SECRET;
+env STORAGE_S3_REGION;
 events { worker_connections 64; }
 http {
     access_log off;
@@ -55,6 +56,7 @@ http {
             apply = function()
                 ngx.var.auth_user_id = "11111111-1111-4111-8111-111111111111"
                 ngx.var.auth_user_token = "fixture-user-token"
+                ngx.ctx.canonical_groups = ngx.var.http_x_test_groups or "active"
             end,
         }
         package.loaded["security.get_service_key"] = function(ref)
@@ -71,7 +73,9 @@ http {
                         assert(options.headers["X-User-Token"] == "fixture-user-token")
                         assert(options.headers["X-Internal-Signature"])
                         local role = ngx.var.http_x_test_role
-                        if url ~= "http://127.0.0.1:19842/api/projects/internal/studio-context/abcdefghijklmnopqrst?access=studio"
+                        local valid_url = url == "http://127.0.0.1:19842/api/projects/internal/studio-context/abcdefghijklmnopqrst?access=studio"
+                            or url == "http://127.0.0.1:19842/api/projects/internal/studio-context/abcdefghijklmnopqrst"
+                        if not valid_url
                             or (role ~= "admin" and role ~= "member") then
                             return { status = 403, body = '{}' }
                         end
@@ -82,6 +86,7 @@ http {
                                 technical_name = ngx.var.http_x_test_technical_name or "technical_project",
                                 project_uuid = "11111111-1111-4111-8111-111111111111",
                                 tenant_uuid = "22222222-2222-4222-8222-222222222222",
+                                role = role,
                                 anon_key = "fixture-anon-key",
                                 enc_admin_key = "fixture-encrypted-admin-key",
                             }),
@@ -99,6 +104,34 @@ http {
         set $auth_user_token "";
         set $project_ref "";
         set $server_path "";
+        location = /api/platform/deployment-mode {
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header Cache-Control "no-store" always;
+            content_by_lua_block {
+                if ngx.req.get_method() ~= "GET" then
+                    ngx.status = 405
+                    ngx.header["Allow"] = "GET"
+                    ngx.header["Content-Type"] = "application/json; charset=utf-8"
+                    ngx.say('{"error":"Method Not Allowed"}')
+                    return ngx.exit(405)
+                end
+                ngx.status = 200
+                ngx.header["Content-Type"] = "application/json; charset=utf-8"
+                ngx.say('{"is_cli_mode":true}')
+                return ngx.exit(200)
+            }
+        }
+        location ~ "^/api/projects/(?<s3_keys_ref>[a-z]{20})/storage/s3-keys$" {
+            access_by_lua_file /workspace/studio/nginx/lua/security/studio_s3_keys_access.lua;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header Cache-Control "no-store, max-age=0" always;
+            add_header Pragma "no-cache" always;
+            proxy_set_header Authorization "";
+            proxy_set_header Proxy-Authorization "";
+            proxy_set_header Cookie "";
+            proxy_set_header X-User-Token $auth_user_token;
+            proxy_pass http://127.0.0.1:19843/api/projects/$s3_keys_ref/storage/s3-keys$is_args$args;
+        }
         location ~ "^/api/platform/pg-meta/([a-z]{20})(/.*)?$" {
             set $resource $2;
             client_body_buffer_size 1k;
@@ -126,6 +159,8 @@ http {
                     project_ref = ngx.var.http_x_project_ref,
                     tab_header = ngx.var.http_x_studio_project_ref,
                     apikey = ngx.var.http_apikey,
+                    cookie = ngx.var.http_cookie,
+                    authorization = ngx.var.http_authorization,
                 }))
             }
         }
@@ -165,6 +200,26 @@ local ok, err = xpcall(function()
     assert(query:find("http://supabase-nginx-technical_project:8081/vector", 1, true))
     assert(not query:find(ref, 1, true) and not query:find("untrusted.example", 1, true))
     assert(echo.target == "/api/projects/" .. ref .. "/meta/query")
+
+    local expected_region = (os.getenv("STORAGE_S3_REGION") or "us-east-1"):match("^%s*(.-)%s*$"):lower()
+    if expected_region == "" then expected_region = "us-east-1" end
+    local studio_v20_wrapper = "begin;\n"
+        .. "create foreign data wrapper my_docs_fdw handler s3_vectors_fdw_handler validator s3_vectors_fdw_validator;\n"
+        .. "do $$\n"
+        .. "begin\n"
+        .. "  execute format(\n"
+        .. "    E'create server my_docs_fdw_server foreign data wrapper my_docs_fdw options (vault_access_key_id ''%s'',vault_secret_access_key ''%s'',aws_region %L,endpoint_url %L,supabase_target_schema %L);',\n"
+        .. "    v_vault_access_key_id,v_vault_secret_access_key,'local','https://untrusted.example:8000/storage/v1/vector','my_vectors'\n"
+        .. "  );\n"
+        .. "end $$;\n"
+        .. "commit;"
+    echo = request(base .. "/query", cjson.encode({ query = studio_v20_wrapper }))
+    local v20_query = assert(cjson.decode(echo.body)).query
+    assert(v20_query:find("'http://supabase-nginx-technical_project:8081/vector'", 1, true), v20_query)
+    assert(v20_query:find("'" .. expected_region .. "'", 1, true), v20_query)
+    assert(v20_query:find("'my_vectors'", 1, true), v20_query)
+    assert(not v20_query:find("untrusted.example", 1, true))
+    assert(not v20_query:find("'local'", 1, true))
 
     echo = request(base .. "/columns?id=42&mode=full", '{"tableId":123,"isNullable":false}')
     assert(echo.target == "/api/projects/" .. ref .. "/meta/columns/42?mode=full")
@@ -221,6 +276,60 @@ local ok, err = xpcall(function()
     invalidate(ref, '{"project_key_version":1.5}', 400)
     invalidate(ref, '{"project_key_version":0}', 400)
     invalidate("technical_project", '{"project_key_version":8}', 404)
+
+    -- Deployment mode endpoint returns JSON (never SPA HTML) and enforces GET-only
+    local dm_get = assert(http.new():request_uri("http://127.0.0.1:19842/api/platform/deployment-mode", {
+        method = "GET",
+    }))
+    assert(dm_get.status == 200, tostring(dm_get.status) .. ": " .. dm_get.body)
+    assert(cjson.decode(dm_get.body).is_cli_mode == true)
+    assert(dm_get.headers["Cache-Control"] == "no-store")
+    assert(dm_get.headers["X-Content-Type-Options"] == "nosniff")
+    count = count + 1
+
+    local dm_post = assert(http.new():request_uri("http://127.0.0.1:19842/api/platform/deployment-mode", {
+        method = "POST",
+    }))
+    assert(dm_post.status == 405 and dm_post.headers["Allow"] == "GET")
+    count = count + 1
+
+    -- Dedicated S3 keys location enforces GET-only, no query args, admin role, header stripping, and HMAC signing
+    local s3_path = "/api/projects/" .. ref .. "/storage/s3-keys"
+    local function s3_request(method, target_path, overrides, expected)
+        local headers = {
+            ["X-Test-User"] = "admin@example.test",
+            ["X-Test-Role"] = "admin",
+            ["Cookie"] = "authelia_session=sensitive",
+            ["Authorization"] = "Bearer leaked",
+        }
+        for name, value in pairs(overrides or {}) do headers[name] = value end
+        local resp = assert(http.new():request_uri("http://127.0.0.1:19842" .. target_path, {
+            method = method,
+            headers = headers,
+        }))
+        assert(resp.status == expected, tostring(resp.status) .. ": " .. resp.body)
+        count = count + 1
+        return resp
+    end
+
+    local s3_ok = s3_request("GET", s3_path, nil, 200)
+    local s3_echo = assert(cjson.decode(s3_ok.body))
+    assert(s3_echo.target == s3_path)
+    assert(s3_echo.project_ref == ref)
+    assert(s3_echo.tab_header == nil)
+    assert(s3_echo.cookie == nil, "Cookie header leaked upstream")
+    assert(s3_echo.authorization == nil, "Authorization header leaked upstream")
+    assert(s3_ok.headers["Cache-Control"] == "no-store, max-age=0")
+    assert(s3_ok.headers["Pragma"] == "no-cache")
+    assert(s3_ok.headers["X-Content-Type-Options"] == "nosniff")
+
+    s3_request("GET", s3_path, { ["X-Test-Role"] = "member", ["X-Test-Groups"] = "active" }, 403)
+    s3_request("GET", s3_path, { ["X-Test-Role"] = "member", ["X-Test-Groups"] = "admin" }, 200)
+    local s3_post = s3_request("POST", s3_path, nil, 405)
+    assert(s3_post.headers["Allow"] == "GET")
+    s3_request("GET", s3_path .. "?extra=1", nil, 400)
+    s3_request("GET", s3_path, { ["X-Studio-Project-Ref"] = other }, 409)
+    s3_request("GET", s3_path, { ["X-Test-User"] = "" }, 401)
 end, debug.traceback)
 assert(os.execute("nginx -p /tmp/studio-ref/ -c /tmp/studio-ref/nginx.conf -s quit") == true)
 if not ok then

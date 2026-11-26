@@ -92,6 +92,26 @@ BEGIN
         EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON TABLES TO %I', tenant_role);
         EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage GRANT USAGE, SELECT ON SEQUENCES TO %I', tenant_role);
     END IF;
+    -- Tenant-DB-scoped Vault privileges for S3 Vectors FDW secrets without
+    -- granting superuser or shared role memberships.
+    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'vault') THEN
+        EXECUTE format('GRANT USAGE ON SCHEMA vault TO %I', tenant_role);
+        IF to_regclass('vault.secrets') IS NOT NULL THEN
+            EXECUTE format('GRANT SELECT, DELETE ON vault.secrets TO %I', tenant_role);
+        END IF;
+        IF to_regclass('vault.decrypted_secrets') IS NOT NULL THEN
+            EXECUTE format('GRANT SELECT ON vault.decrypted_secrets TO %I', tenant_role);
+        END IF;
+        FOR obj IN
+            SELECT p.oid::regprocedure AS signature
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'vault'
+              AND p.proname IN ('create_secret', 'update_secret', '_crypto_aead_det_decrypt')
+        LOOP
+            EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %I', obj.signature, tenant_role);
+        END LOOP;
+    END IF;
 END
 $tenant_meta$;
 DO $assistant_reader$

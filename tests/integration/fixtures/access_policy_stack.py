@@ -494,27 +494,51 @@ async def check():
             return r
 
         await asyncio.sleep(1)
-        for path in (
-            "/rest/v1/table",
-            "/auth/v1/user",
-            "/graphql/v1",
-            "/storage/v1/object/a/b",
-            "/functions/v1/hello",
-            "/vector/bucket",
+        vector_sigv4_headers = {
+            "Authorization": (
+                "AWS4-HMAC-SHA256 Credential=ak123/20261126/us-east-1/s3vectors/aws4_request, "
+                "SignedHeaders=host;x-amz-date, "
+                "Signature=" + ("a" * 64)
+            ),
+            "X-Amz-Date": "20261126T120000Z",
+        }
+        for path, method, extra_headers in (
+            ("/rest/v1/table", "GET", {}),
+            ("/auth/v1/user", "GET", {}),
+            ("/graphql/v1", "GET", {}),
+            ("/storage/v1/object/a/b", "GET", {}),
+            ("/functions/v1/hello", "GET", {}),
+            ("/storage/v1/vector/ListVectorBuckets", "POST", {}),
+            ("/vector/ListVectorBuckets", "POST", vector_sigv4_headers),
         ):
             r = await request(
                 path,
+                method=method,
                 headers={
                     "X-Gateway-Admission": "forged",
                     "X-Opaque-Key-Id": "forged",
                     "X-Country-Code": "BR",
                     "X-Project-Name": "forged",
+                    **extra_headers,
                 },
             )
             seen = {k.lower(): v for k, v in r.json()["headers"].items()}
             assert seen["apikey"] == "synthetic-anon-jwt", (path, seen)
             assert "x-gateway-admission" not in seen and "x-admission-uri" not in seen
             assert seen["x-api-key-id"] == slot["key_id"]
+            if extra_headers:
+                assert seen["authorization"] == vector_sigv4_headers["Authorization"], (path, seen)
+        for bad_path, bad_method, bad_status in (
+            ("/vector/ListVectorBuckets", "GET", 405),
+            ("/vector/ListVectorBuckets", "POST", 403),
+            ("/storage/v1/vector/ListVectorBuckets", "GET", 405),
+        ):
+            r = await client.request(
+                bad_method,
+                "http://edge:8080/" + p["ref"] + bad_path,
+                headers={"apikey": slot["key"], "X-Forwarded-For": "8.8.8.8"},
+            )
+            assert r.status_code == bad_status, (bad_path, bad_method, bad_status, r.status_code)
         await request("/rest/v1/table", method="POST", json={"v": 1})
         await request("/rest/v1/table?apikey=" + slot["key"], key=None)
         await request("/realtime/v1/websocket?apikey=" + slot["key"] + "&vsn=1.0.0", key=None)

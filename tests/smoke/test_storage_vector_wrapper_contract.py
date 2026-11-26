@@ -63,17 +63,43 @@ class StorageVectorWrapperContractTests(unittest.TestCase):
         self.assertIn("vault_secret_access_key", script)
         self.assertNotIn("host.docker.internal", script)
 
+    def test_wrapper_grants_usage_strictly_to_project_uuid_tenant_meta_role(self) -> None:
+        script = WRAPPER_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn('TENANT_META_ROLE="tenant_meta_${PROJECT_UUID//-/}"', script)
+        self.assertIn('-e SETUP_TENANT_META_ROLE="$TENANT_META_ROLE"', script)
+        self.assertIn(r"\getenv tenant_meta_role SETUP_TENANT_META_ROLE", script)
+        self.assertIn("IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = cfg.tenant_meta_role) THEN", script)
+        self.assertIn(
+            "EXECUTE format('GRANT USAGE ON FOREIGN DATA WRAPPER %I TO %I', cfg.wrapper_name, cfg.tenant_meta_role);",
+            script,
+        )
+        self.assertIn(
+            "EXECUTE format('GRANT USAGE ON FOREIGN SERVER %I TO %I', cfg.server_name, cfg.tenant_meta_role);",
+            script,
+        )
+        self.assertNotIn("nspowner", script)
+
     def test_internal_vector_listener_only_accepts_sigv4_and_has_no_public_port(self) -> None:
-        nginx = (ROOT / 'servidor/generateProject/nginxtemplate').read_text()
+        nginx = (ROOT / 'servidor/generateProject/nginxtemplate').read_text(encoding="utf-8")
         internal = nginx.split('listen 8081;', 1)[1]
+        self.assertIn(
+            r'"~^AWS4-HMAC-SHA256 Credential=[^/,\s]+/[0-9]{8}/[^/,\s]+/s3vectors/aws4_request,\s*SignedHeaders=[^,\s]+,\s*Signature=[0-9a-fA-F]{64}$" 1;',
+            nginx,
+        )
+        self.assertIn('"~^[0-9]{8}T[0-9]{6}Z$" 1;', nginx)
+        self.assertIn('map "$has_sigv4_header:$has_amz_date" $is_sigv4_auth', nginx)
         self.assertIn('allow ${PROJECT_GATEWAYS_SUBNET};', internal)
         self.assertIn('allow ${SUPABASE_NETWORK_SUBNET};', internal)
         self.assertIn('deny all;', internal)
         self.assertIn('if ($request_method != POST) { return 405; }', internal)
-        self.assertIn('if ($http_authorization !~ "^AWS4-HMAC-SHA256 ") { return 403; }', internal)
+        self.assertIn('if ($uri !~ "^/vector/[A-Za-z]+$") { return 404; }', internal)
+        self.assertIn('if ($is_sigv4_auth != 1) { return 403; }', internal)
+        self.assertIn('client_max_body_size 25m;', internal)
+        self.assertIn('proxy_set_header Forwarded "";', internal)
         self.assertIn('proxy_set_header apikey "";', internal)
         self.assertIn('proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";', internal)
-        self.assertNotIn('ports:', (ROOT / 'servidor/generateProject/dockercomposetemplate').read_text())
+        self.assertNotIn('ports:', (ROOT / 'servidor/generateProject/dockercomposetemplate').read_text(encoding="utf-8"))
 
     def test_probe_is_transactional_and_uses_only_the_canonical_import_protocol(self) -> None:
         script = WRAPPER_SCRIPT.read_text()

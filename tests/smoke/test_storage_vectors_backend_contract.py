@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 import unittest
 
@@ -9,6 +10,7 @@ from tests.smoke.common import bash_path, git_compatible_bash
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 ENV_TEMPLATE = ROOT / "servidor/generateProject/.envtemplate"
 CREATE_TEMPLATE_SCRIPT = ROOT / "servidor/volumes/db/create_template.sh"
+MIGRATE_SHARED_STORAGE = ROOT / "servidor/generateProject/migrate_shared_storage.sh"
 VECTOR_LIBRARY = ROOT / "servidor/generateProject/lib/vector_lifecycle.sh"
 GENERATE_ENTRYPOINT = ROOT / "servidor/generateProject/generate_project.sh"
 DUPLICATE_ENTRYPOINT = ROOT / "servidor/generateProject/duplicate_project.sh"
@@ -33,6 +35,102 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
         data_plane = (ROOT / "servidor/volumes/storage-proxy/nginx.conf").read_text(encoding="utf-8")
         self.assertIn("proxy_set_header Host $http_host;", data_plane)
 
+    def test_project_nginx_enforces_strict_vector_sigv4_method_path_and_cors(self) -> None:
+        gateway = (ROOT / "servidor/generateProject/nginxtemplate").read_text(encoding="utf-8")
+
+        sigv4_regex = (
+            r"^AWS4-HMAC-SHA256 Credential=[^/,\s]+/[0-9]{8}/[^/,\s]+/s3vectors/aws4_request,"
+            r"\s*SignedHeaders=[^,\s]+,\s*Signature=[0-9a-fA-F]{64}$"
+        )
+        date_regex = r"^[0-9]{8}T[0-9]{6}Z$"
+
+        self.assertIn("variables_hash_max_size 2048;", gateway)
+        self.assertIn("map $http_authorization $has_sigv4_header", gateway)
+        self.assertIn(f'"~{sigv4_regex}" 1;', gateway)
+        self.assertIn("map $http_x_amz_date $has_amz_date", gateway)
+        self.assertIn(f'"~{date_regex}" 1;', gateway)
+        self.assertIn('map "$has_sigv4_header:$has_amz_date" $is_sigv4_auth', gateway)
+        self.assertIn("map $http_authorization $is_sigv4_scheme", gateway)
+        self.assertIn('map "$is_sigv4_auth:$is_sigv4_scheme:$has_apikey:$has_authorization" $vector_auth_status', gateway)
+        self.assertIn('"1:1:0:1" 200;', gateway)
+        self.assertIn('"1:1:1:1" 200;', gateway)
+        self.assertIn('"0:0:1:0" 200;', gateway)
+        self.assertIn('"0:0:1:1" 200;', gateway)
+        self.assertIn('"0:0:0:0" 401;', gateway)
+
+        sigv4_re = re.compile(sigv4_regex)
+        date_re = re.compile(date_regex)
+        valid_sig = "a" * 64
+        for accepted in (
+            f"AWS4-HMAC-SHA256 Credential=ak123/20261126/us-east-1/s3vectors/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature={valid_sig}",
+            f"AWS4-HMAC-SHA256 Credential=ak123/20261126/sa-east-1/s3vectors/aws4_request,SignedHeaders=host;x-amz-date,Signature={valid_sig.upper()}",
+        ):
+            self.assertIsNotNone(sigv4_re.fullmatch(accepted))
+        for rejected in (
+            "AWS4-HMAC-SHA256 garbage",
+            f"AWS4-HMAC-SHA256 Credential=ak123/20261126/us-east-1/s3/aws4_request, SignedHeaders=host, Signature={valid_sig}",
+            f"AWS4-HMAC-SHA256 Credential=ak123/20261126/us-east-1/s3vectors/aws4_request, SignedHeaders=host, Signature={'a' * 63}",
+            f"AWS4-HMAC-SHA256 Credential=ak123/20261126/us-east-1/s3vectors/aws4_request, SignedHeaders=host, Signature={'g' * 64}",
+            "Bearer some-jwt",
+            "",
+        ):
+            with self.subTest(sigv4=rejected):
+                self.assertIsNone(sigv4_re.fullmatch(rejected))
+
+        self.assertIsNotNone(date_re.fullmatch("20261126T120000Z"))
+        for bad_date in ("", "2026-11-26T12:00:00Z", "20261126T120000", "garbage"):
+            with self.subTest(amz_date=bad_date):
+                self.assertIsNone(date_re.fullmatch(bad_date))
+
+        public_vector_block = gateway.split("location ^~ /storage/v1/vector/ {", 1)[1].split(
+            "location /storage/v1/ {", 1
+        )[0]
+        storage_block = gateway.split("location /storage/v1/ {", 1)[1].split(
+            "location /vector/ {", 1
+        )[0]
+        vector_8080_block = gateway.split("location /vector/ {", 1)[1].split("\n        }", 1)[0]
+
+        for required in (
+            "set $opaque_target_service storage;",
+            "auth_request /_internal/opaque-key-authorize;",
+            "if ($request_method != 'POST') {\n                return 405;\n            }",
+            'if ($uri !~ "^/storage/v1/vector/[A-Za-z]+$") {\n                return 404;\n            }',
+            "if ($vector_auth_status = 401)",
+            "if ($vector_auth_status != 200)",
+            "client_max_body_size 25m;",
+            "rewrite ^/storage/v1/(.*)$ /$1 break;",
+            "proxy_set_header Host $http_host;",
+            'proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";',
+            'proxy_set_header X-Forwarded-Prefix "/{{project_public_ref}}/storage/v1";',
+            'proxy_set_header Forwarded "";',
+            "proxy_set_header apikey $opaque_upstream_apikey;",
+            "proxy_set_header Authorization $opaque_upstream_authorization;",
+        ):
+            self.assertIn(required, public_vector_block)
+
+        self.assertIn('proxy_set_header Forwarded "";', storage_block)
+        for header in ("x-amz-date", "x-amz-content-sha256", "x-amz-security-token", "x-amz-target"):
+            self.assertEqual(public_vector_block.count(header), 2)
+            self.assertEqual(storage_block.count(header), 2)
+
+        for required in (
+            "if ($request_method != POST) { return 405; }",
+            'if ($uri !~ "^/vector/[A-Za-z]+$") { return 404; }',
+            "if ($is_sigv4_auth != 1) { return 403; }",
+            "client_max_body_size 25m;",
+            'proxy_set_header Forwarded "";',
+        ):
+            self.assertIn(required, vector_8080_block)
+
+        public_op_re = re.compile(r"^/storage/v1/vector/[A-Za-z]+$")
+        internal_op_re = re.compile(r"^/vector/[A-Za-z]+$")
+        self.assertIsNotNone(public_op_re.fullmatch("/storage/v1/vector/ListVectorBuckets"))
+        self.assertIsNotNone(internal_op_re.fullmatch("/vector/ListVectorBuckets"))
+        for bad_suffix in ("", "ListVectorBuckets/", "ListVectorBuckets/extra", "../bucket", "%2e%2e/bucket", "123"):
+            with self.subTest(suffix=bad_suffix):
+                self.assertIsNone(public_op_re.fullmatch(f"/storage/v1/vector/{bad_suffix}"))
+                self.assertIsNone(internal_op_re.fullmatch(f"/vector/{bad_suffix}"))
+
     def test_project_template_enables_real_pgvector_backend(self) -> None:
         env = ENV_TEMPLATE.read_text(encoding="utf-8")
         compose = GLOBAL_COMPOSE.read_text(encoding="utf-8")
@@ -51,12 +149,16 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
         script = CREATE_TEMPLATE_SCRIPT.read_text(encoding="utf-8")
 
         create_vector = script.index("CREATE EXTENSION IF NOT EXISTS vector SCHEMA public")
+        create_wrappers = script.index("CREATE EXTENSION IF NOT EXISTS wrappers SCHEMA extensions")
         create_template = script.index("CREATE DATABASE _supabase_template")
         restore_template = script.index("Fazendo pg_dump do DB principal")
 
         self.assertLess(create_vector, create_template)
+        self.assertLess(create_wrappers, create_template)
         self.assertLess(create_template, restore_template)
         self.assertIn("pgvector >= 0.7.0 required for Storage Vectors", script)
+        self.assertIn("wrappers >= 0.5.7 required for s3_vectors_fdw", script)
+        self.assertIn("ARRAY[0, 5, 7]::int[]", script)
 
     def test_database_template_validates_the_inherited_extension(self) -> None:
         script = CREATE_TEMPLATE_SCRIPT.read_text(encoding="utf-8")
@@ -65,6 +167,33 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
         self.assertIn("_supabase_template was created without pgvector", script)
         self.assertIn("installed_schema <> 'public'", script)
         self.assertIn("_supabase_template requires pgvector >= 0.7.0", script)
+        self.assertIn("_supabase_template was created without wrappers", script)
+        self.assertIn("installed_schema <> 'extensions'", script)
+        self.assertIn("wrappers must be installed in extensions for s3_vectors_fdw", script)
+        self.assertIn("_supabase_template requires wrappers >= 0.5.7", script)
+        self.assertIn(
+            "ALTER ROLE supabase_storage_admin IN DATABASE _supabase_template SET search_path = storage, public;",
+            script,
+        )
+        self.assertIn(
+            'ALTER ROLE supabase_storage_admin IN DATABASE :"target_db" SET search_path = storage, public;',
+            script,
+        )
+
+    def test_shared_storage_migration_ensures_wrappers_and_storage_admin_search_path(self) -> None:
+        migration = MIGRATE_SHARED_STORAGE.read_text(encoding="utf-8")
+
+        self.assertIn("CREATE EXTENSION IF NOT EXISTS wrappers SCHEMA extensions;", migration)
+        self.assertIn("ARRAY[0, 5, 7]::int[]", migration)
+        self.assertIn("wrappers must be installed in extensions for s3_vectors_fdw", migration)
+        self.assertIn(
+            'ALTER ROLE supabase_storage_admin IN DATABASE \\"$database\\" SET search_path = storage, public;',
+            migration,
+        )
+        self.assertGreaterEqual(
+            migration.count('ensure_project_vector_database_prerequisites "_supabase_$project"'),
+            2,
+        )
 
     def test_generate_duplicate_and_rename_share_the_vector_contract(self) -> None:
         library = VECTOR_LIBRARY.read_text(encoding="utf-8")
@@ -157,6 +286,7 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
     def test_shell_syntax(self) -> None:
         scripts = (
             CREATE_TEMPLATE_SCRIPT,
+            MIGRATE_SHARED_STORAGE,
             VECTOR_LIBRARY,
             GENERATE_ENTRYPOINT,
             DUPLICATE_ENTRYPOINT,

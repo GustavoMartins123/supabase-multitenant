@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
 import subprocess
@@ -46,15 +47,23 @@ class PgMetaRewriteHardeningTest(unittest.TestCase):
         runtime = lua_runtime()
         if runtime is None:
             self.skipTest("runtime Lua nao esta instalado")
-        result = subprocess.run(
-            [runtime, str(RUNTIME_SPEC)],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-        self.assertIn("pg_meta rewrite runtime: ok", result.stdout)
+        for region_env in (None, "sa-east-1"):
+            env = os.environ.copy()
+            if region_env is None:
+                env.pop("STORAGE_S3_REGION", None)
+            else:
+                env["STORAGE_S3_REGION"] = region_env
+            with self.subTest(storage_s3_region=region_env):
+                result = subprocess.run(
+                    [runtime, str(RUNTIME_SPEC)],
+                    cwd=ROOT,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+                self.assertIn("pg_meta rewrite runtime: ok", result.stdout)
 
 
 if __name__ == "__main__":

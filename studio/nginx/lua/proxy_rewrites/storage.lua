@@ -59,9 +59,77 @@ local function set_json_body(body)
     return true
 end
 
+local function clear_uri_args()
+    if ngx.req and ngx.req.set_uri_args then
+        ngx.req.set_uri_args({})
+    end
+end
+
+local function parse_list_query_args()
+    if not ngx.req or not ngx.req.get_uri_args then
+        return {}
+    end
+
+    local args, args_err = ngx.req.get_uri_args(100)
+    if args_err == "truncated" then
+        return nil, "Parametros de consulta em excesso", ngx.HTTP_BAD_REQUEST,
+            "storage_platform_invalid_query"
+    end
+    if type(args) ~= "table" then
+        return {}
+    end
+
+    local params = {}
+
+    if args.prefix ~= nil then
+        if type(args.prefix) ~= "string" then
+            return nil, "prefix deve ser uma string", ngx.HTTP_BAD_REQUEST,
+                "storage_platform_invalid_prefix"
+        end
+        if args.prefix ~= "" then
+            params.prefix = args.prefix
+        end
+    end
+
+    if args.nextToken ~= nil then
+        if type(args.nextToken) ~= "string" then
+            return nil, "nextToken deve ser uma string", ngx.HTTP_BAD_REQUEST,
+                "storage_platform_invalid_next_token"
+        end
+        if args.nextToken ~= "" then
+            params.nextToken = args.nextToken
+        end
+    end
+
+    if args.maxResults ~= nil then
+        if type(args.maxResults) ~= "string" or not args.maxResults:match("^[0-9]+$") then
+            return nil, "maxResults deve ser um inteiro entre 1 e 500", ngx.HTTP_BAD_REQUEST,
+                "storage_platform_invalid_max_results"
+        end
+        local max_results = tonumber(args.maxResults)
+        if not max_results or max_results < 1 or max_results > 500
+            or max_results ~= math.floor(max_results)
+        then
+            return nil, "maxResults deve ser um inteiro entre 1 e 500", ngx.HTTP_BAD_REQUEST,
+                "storage_platform_invalid_max_results"
+        end
+        params.maxResults = max_results
+    end
+
+    return params
+end
+
 local function set_route_body(route)
     if route.body_mode == nil then
         return true
+    end
+
+    if route.body_mode == "vector_buckets_list" then
+        local list_args, err, status, code = parse_list_query_args()
+        if not list_args then
+            return nil, err, status, code
+        end
+        return set_json_body(list_args)
     end
 
     if route.body_mode == "empty_json_object" then
@@ -75,10 +143,22 @@ local function set_route_body(route)
     end
 
     if route.body_mode == "vector_indexes_list" then
-        return set_json_body({
+        local list_args, err, status, code = parse_list_query_args()
+        if not list_args then
+            return nil, err, status, code
+        end
+        ngx.ctx.storage_platform_list_args = list_args
+        local payload = {
             vectorBucketName = route.vector_bucket_name,
-            maxResults = 100,
-        })
+            maxResults = list_args.maxResults or 100,
+        }
+        if list_args.prefix ~= nil then
+            payload.prefix = list_args.prefix
+        end
+        if list_args.nextToken ~= nil then
+            payload.nextToken = list_args.nextToken
+        end
+        return set_json_body(payload)
     end
 
     if route.body_mode == "vector_index_identity" then
@@ -187,6 +267,9 @@ if route then
     ngx.ctx.storage_platform_original_uri = original_uri
     if route.route_name == "object_sign_multi" then
         ngx.ctx.sign_response_mode = "multi"
+    end
+    if route.uri and route.uri:find("^/storage/v1/vector/") ~= nil then
+        clear_uri_args()
     end
     ngx.req.set_uri(route.uri, false)
 elseif route_error then

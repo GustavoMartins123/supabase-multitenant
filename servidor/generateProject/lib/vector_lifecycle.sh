@@ -118,6 +118,9 @@ BEGIN
   END IF;
 END
 $drop_vector_secrets$;
+
+DROP EVENT TRIGGER IF EXISTS studio_vector_fdw_enforce_server_endpoint;
+DROP SCHEMA IF EXISTS studio_vector_fdw_guard CASCADE;
 SQL
 }
 

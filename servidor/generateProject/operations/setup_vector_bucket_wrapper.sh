@@ -46,11 +46,12 @@ set +a
 [[ -n "${STORAGE_S3_REGION:-}" ]] || fail "STORAGE_S3_REGION ausente"
 [[ -n "${PROJECT_UUID:-}" ]] || fail "PROJECT_UUID ausente"
 [[ -n "${SERVICE_ROLE_KEY_PROJETO:-}" ]] || fail "SERVICE_ROLE_KEY_PROJETO ausente"
+PROJECT_UUID="$(tr '[:upper:]' '[:lower:]' <<<"$PROJECT_UUID")"
 STORAGE_REGION="$STORAGE_S3_REGION"
 
 vector_validate_s3_credentials || exit 1
 vector_validate_database "$POSTGRES_DATABASE" || exit 1
-storage_assert_project_identity "$PROJECT_ID" "${PROJECT_UUID,,}" \
+storage_assert_project_identity "$PROJECT_ID" "$PROJECT_UUID" \
   || fail "Identidade Storage diverge do control plane"
 
 docker inspect supabase-db >/dev/null 2>&1 || fail "Container supabase-db nao encontrado"
@@ -81,6 +82,7 @@ SERVER_NAME="${VECTOR_NAMES[1]:-}"
 ACCESS_SECRET_NAME="${WRAPPER_NAME}_vault_access_key_id"
 SECRET_SECRET_NAME="${WRAPPER_NAME}_vault_secret_access_key"
 VECTOR_ENDPOINT="http://supabase-nginx-${PROJECT_ID}:8081/vector"
+TENANT_META_ROLE="tenant_meta_${PROJECT_UUID//-/}"
 
 # Confirma que o bucket existe no tenant real antes de alterar o catalogo.
 echo "▶ Validando o vector bucket '$BUCKET_NAME' no Storage API..."
@@ -135,6 +137,7 @@ docker exec -i \
   -e SETUP_S3_SECRET_KEY="$S3_PROTOCOL_ACCESS_KEY_SECRET" \
   -e SETUP_REGION="$STORAGE_REGION" \
   -e SETUP_ENDPOINT="$VECTOR_ENDPOINT" \
+  -e SETUP_TENANT_META_ROLE="$TENANT_META_ROLE" \
   supabase-db psql \
     -X -q -v ON_ERROR_STOP=1 \
     -U "$POSTGRES_USER" \
@@ -147,6 +150,7 @@ docker exec -i \
 \getenv s3_secret_key SETUP_S3_SECRET_KEY
 \getenv aws_region SETUP_REGION
 \getenv endpoint_url SETUP_ENDPOINT
+\getenv tenant_meta_role SETUP_TENANT_META_ROLE
 
 BEGIN;
 SET LOCAL log_statement = 'none';
@@ -159,14 +163,16 @@ CREATE TEMP TABLE vector_wrapper_setup_params (
   s3_access_key text NOT NULL,
   s3_secret_key text NOT NULL,
   aws_region text NOT NULL,
-  endpoint_url text NOT NULL
+  endpoint_url text NOT NULL,
+  tenant_meta_role text NOT NULL
 ) ON COMMIT DROP;
 
 INSERT INTO vector_wrapper_setup_params VALUES (
   :'wrapper_name', :'server_name',
   :'access_secret_name', :'secret_secret_name',
   :'s3_access_key', :'s3_secret_key',
-  :'aws_region', :'endpoint_url'
+  :'aws_region', :'endpoint_url',
+  :'tenant_meta_role'
 );
 
 DO $setup$
@@ -185,7 +191,8 @@ BEGIN
 
   SELECT id INTO access_secret_id
   FROM vault.secrets
-  WHERE name = cfg.access_secret_name;
+  WHERE name = cfg.access_secret_name
+  LIMIT 1;
 
   IF access_secret_id IS NULL THEN
     access_secret_id := vault.create_secret(
@@ -204,7 +211,8 @@ BEGIN
 
   SELECT id INTO secret_secret_id
   FROM vault.secrets
-  WHERE name = cfg.secret_secret_name;
+  WHERE name = cfg.secret_secret_name
+  LIMIT 1;
 
   IF secret_secret_id IS NULL THEN
     secret_secret_id := vault.create_secret(
@@ -322,6 +330,14 @@ BEGIN
         );
       END IF;
     END LOOP;
+  END IF;
+
+  -- Allow ONLY this tenant's exact isolated Studio SQL role (derived from PROJECT_UUID)
+  -- to use this FDW/server, never inferring from schema ownership (which still belongs
+  -- to the source tenant's role during database cloning).
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = cfg.tenant_meta_role) THEN
+    EXECUTE format('GRANT USAGE ON FOREIGN DATA WRAPPER %I TO %I', cfg.wrapper_name, cfg.tenant_meta_role);
+    EXECUTE format('GRANT USAGE ON FOREIGN SERVER %I TO %I', cfg.server_name, cfg.tenant_meta_role);
   END IF;
 END
 $setup$;

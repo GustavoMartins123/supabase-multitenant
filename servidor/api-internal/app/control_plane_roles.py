@@ -13,12 +13,21 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, quote
 
 import asyncpg
-from app.tenant_meta_identity import tenant_meta_credentials, tenant_storage_policy_key
+from app.tenant_meta_identity import (
+    tenant_meta_credentials,
+    tenant_storage_policy_key,
+    tenant_vector_fdw_key,
+)
 
 
 async def ensure_tenant_meta_roles(pool: asyncpg.Pool, *, admin_dsn: str, password: str) -> None:
     """Privileged migration of every existing tenant; missing DB/identity is an error."""
+    from app import storage_policies
+
     template = Path(__file__).with_name("tenant_meta_role.sql").read_text(encoding="utf-8")
+    storage_guard_sql = Path(__file__).with_name("studio_storage_policies.sql").read_text(encoding="utf-8")
+    vector_fdw_guard_sql = Path(__file__).with_name("studio_vector_fdw_guard.sql").read_text(encoding="utf-8")
+    storage_s3_region = storage_policies.resolve_storage_s3_region()
     # A tenant login must not inherit PostgreSQL's default PUBLIC CONNECT to
     # cluster databases (including template1). Service grants are explicit.
     async with pool.acquire() as conn:
@@ -53,9 +62,19 @@ async def ensure_tenant_meta_roles(pool: asyncpg.Pool, *, admin_dsn: str, passwo
                     "SELECT to_regclass('storage.objects') IS NOT NULL"
                     " OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner"
                     " WHERE c.oid = to_regclass('auth.users') AND r.rolname = 'supabase_auth_admin')"
+                    " OR EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'wrappers')"
                 ):
-                    await conn.execute("SELECT set_config('platform.storage_policy_key',$1,true)", tenant_storage_policy_key(row["tenant_uuid"], password).hex())
-                    await conn.execute(Path(__file__).with_name("studio_storage_policies.sql").read_text())
+                    await conn.execute(
+                        "SELECT set_config('platform.storage_policy_key',$1,true),"
+                        "set_config('platform.vector_fdw_key',$2,true),"
+                        "set_config('platform.vector_fdw_endpoint_url',$3,true),"
+                        "set_config('platform.vector_fdw_aws_region',$4,true)",
+                        tenant_storage_policy_key(row["tenant_uuid"], password).hex(),
+                        tenant_vector_fdw_key(row["tenant_uuid"], password).hex(),
+                        storage_policies.vector_fdw_endpoint_url(row["name"]),
+                        storage_s3_region,
+                    )
+                    await conn.execute(storage_guard_sql + "\n" + vector_fdw_guard_sql)
         finally:
             await conn.close()
 

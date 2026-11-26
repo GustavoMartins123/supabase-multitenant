@@ -39,7 +39,7 @@ SAFETY_BACKUP_ID="$(echo "$SAFETY_BACKUP_ID" | tr '[:upper:]' '[:lower:]')"
 [[ "$SAFETY_BACKUP_ID" =~ $UUID_RE ]] || die "safety_backup_id invalido"
 [[ "$BACKUP_ID" != "$SAFETY_BACKUP_ID" ]] || die "Ids de backup identicos"
 
-for command in docker jq openssl tar gzip; do
+for command in docker jq openssl python3 tar gzip; do
   command -v "$command" >/dev/null || die "Comando obrigatorio ausente: $command"
 done
 
@@ -281,6 +281,7 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c
 echo "HOST_AGENT_PROGRESS=restore:restore_database"
 say "Restaurando dump do banco..."
 gunzip -c "$SRC_DIR/db.sql.gz" \
+  | python3 "$SCRIPT_DIR/lib/pg_dump_filter.py" sql \
   | docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" >/dev/null
 gunzip -c "$SRC_DIR/realtime-structure.sql.gz" \
   | docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" >/dev/null

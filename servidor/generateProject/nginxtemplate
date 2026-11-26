@@ -112,6 +112,45 @@ http {
         default $http_x_request_id;
     }
 
+    map $http_authorization $has_sigv4_header {
+        default 0;
+        "~^AWS4-HMAC-SHA256 Credential=[^/,\s]+/[0-9]{8}/[^/,\s]+/s3vectors/aws4_request,\s*SignedHeaders=[^,\s]+,\s*Signature=[0-9a-fA-F]{64}$" 1;
+    }
+
+    map $http_x_amz_date $has_amz_date {
+        default 0;
+        "~^[0-9]{8}T[0-9]{6}Z$" 1;
+    }
+
+    map "$has_sigv4_header:$has_amz_date" $is_sigv4_auth {
+        default 0;
+        "1:1"   1;
+    }
+
+    map $http_authorization $is_sigv4_scheme {
+        default 0;
+        "~*^AWS4-" 1;
+    }
+
+    map $http_apikey $has_apikey {
+        ""      0;
+        default 1;
+    }
+
+    map $http_authorization $has_authorization {
+        ""      0;
+        default 1;
+    }
+
+    map "$is_sigv4_auth:$is_sigv4_scheme:$has_apikey:$has_authorization" $vector_auth_status {
+        default 403;
+        "1:1:0:1" 200;
+        "1:1:1:1" 200;
+        "0:0:1:0" 200;
+        "0:0:1:1" 200;
+        "0:0:0:0" 401;
+    }
+
     server {
         listen 8080;
         server_name _{{project_id}};
@@ -441,6 +480,65 @@ http {
         }
 
 
+        location ^~ /storage/v1/vector/ {
+            set $opaque_target_service storage;
+            auth_request /_internal/opaque-key-authorize;
+
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
+                add_header 'Access-Control-Allow-Methods' 'POST, OPTIONS' always;
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Requested-With, x-supabase-api-version, X-Client-Info, x-amz-date, x-amz-content-sha256, x-amz-security-token, x-amz-target' always;
+                add_header 'Access-Control-Max-Age' 86400 always;
+                return 204;
+            }
+
+            if ($request_method != 'POST') {
+                return 405;
+            }
+            if ($uri !~ "^/storage/v1/vector/[A-Za-z]+$") {
+                return 404;
+            }
+            if ($vector_auth_status = 401) {
+                return 401;
+            }
+            if ($vector_auth_status != 200) {
+                return 403;
+            }
+
+            client_max_body_size 25m;
+
+            rewrite ^/storage/v1/(.*)$ /$1 break;
+
+            proxy_hide_header Access-Control-Allow-Origin;
+            proxy_hide_header Access-Control-Allow-Methods;
+            proxy_hide_header Access-Control-Allow-Headers;
+
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";
+            proxy_set_header X-Forwarded-Prefix "/{{project_public_ref}}/storage/v1";
+            proxy_set_header Forwarded "";
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header Authorization $opaque_upstream_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
+
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
+            proxy_pass http://$storage_upstream;
+            proxy_http_version 1.1;
+
+            proxy_request_buffering off;
+            proxy_buffering off;
+
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'POST, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Requested-With, x-supabase-api-version, X-Client-Info, x-amz-date, x-amz-content-sha256, x-amz-security-token, x-amz-target' always;
+        }
+
         location /storage/v1/ {
             set $opaque_target_service storage;
             auth_request /_internal/opaque-key-authorize;
@@ -448,7 +546,7 @@ http {
             if ($request_method = 'OPTIONS') {
                 add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT' always;
-                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version, x-amz-date, x-amz-content-sha256, x-amz-security-token, x-amz-target' always;
                 add_header 'Access-Control-Max-Age' 86400 always;
                 return 204;
             }
@@ -467,6 +565,7 @@ http {
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";
             proxy_set_header X-Forwarded-Prefix "/{{project_public_ref}}/storage/v1";
+            proxy_set_header Forwarded "";
 
             proxy_set_header Tus-Resumable $http_tus_resumable;
             proxy_set_header Tus-Version $http_tus_version;
@@ -493,7 +592,7 @@ http {
 
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT' always;
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version, x-amz-date, x-amz-content-sha256, x-amz-security-token, x-amz-target' always;
         }
 
         # Endpoint SigV4 dos S3 Vectors Wrappers. O gateway fixa o tenant e
@@ -501,13 +600,19 @@ http {
         location /vector/ {
             set $opaque_target_service storage;
             auth_request /_internal/opaque-key-authorize;
-            proxy_set_header apikey $opaque_upstream_apikey;
-            proxy_set_header Authorization $opaque_upstream_authorization;
-            proxy_set_header X-Api-Key-Id $opaque_key_id;
             allow ${PROJECT_GATEWAYS_SUBNET};
             allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
 
+            if ($request_method != POST) { return 405; }
+            if ($uri !~ "^/vector/[A-Za-z]+$") { return 404; }
+            if ($is_sigv4_auth != 1) { return 403; }
+
+            client_max_body_size 25m;
+
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header Authorization $opaque_upstream_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
             proxy_set_header X-Gateway-Admission "";
             proxy_set_header X-Admission-URI "";
             proxy_set_header X-Admission-Method "";
@@ -517,6 +622,7 @@ http {
             proxy_set_header Host $http_host;
             proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";
             proxy_set_header X-Forwarded-Prefix "";
+            proxy_set_header Forwarded "";
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto http;
@@ -596,7 +702,10 @@ http {
             deny all;
 
             if ($request_method != POST) { return 405; }
-            if ($http_authorization !~ "^AWS4-HMAC-SHA256 ") { return 403; }
+            if ($uri !~ "^/vector/[A-Za-z]+$") { return 404; }
+            if ($is_sigv4_auth != 1) { return 403; }
+
+            client_max_body_size 25m;
 
             proxy_pass http://$storage_upstream;
             proxy_http_version 1.1;
@@ -604,6 +713,7 @@ http {
             proxy_set_header apikey "";
             proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";
             proxy_set_header X-Forwarded-Prefix "";
+            proxy_set_header Forwarded "";
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header X-Forwarded-Proto http;
