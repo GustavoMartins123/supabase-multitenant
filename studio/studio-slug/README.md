@@ -6,6 +6,19 @@ Esta imagem parte do Supabase Studio no commit
 `studio-security-deps.patch` (`next@16.4.6` e `sharp@0.35.5` sobre runtime
 limpo `node:22.23.5-trixie-slim` como usuário não-root `node`).
 
+Desde a `20290c7-context-v20`, a imagem também leva o arquivo
+`libpg-query.wasm`, usado para ler consultas SQL no servidor, e o tamanho do
+banco mostrado no Studio passa a ser o do projeto aberto, não a soma de todos
+os bancos.
+
+Desde a `20290c7-context-v21`
+(`sha256:d9487aa28afed66d9c026a7f513936008658864de69aa23010721e013e6023c7`),
+Storage Vectors é habilitado nativamente em modo self-hosted sem depender do
+workaround `is_cli_mode: true` no gateway (sem exibir dicas de CLI como
+`supabase/config.toml` nem o aviso de staging `us-east-1`), e a criação de novas
+tabelas vetoriais em buckets já expostos passa a reutilizar a sintaxe de
+`IMPORT FOREIGN SCHEMA` para `wrappers >= 0.5.7`.
+
 O contrato do patch é intencionalmente estrito:
 
 - `/project/<ref>` é a origem do contexto da aba;

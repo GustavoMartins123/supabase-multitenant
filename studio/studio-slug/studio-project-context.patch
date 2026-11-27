@@ -5017,3 +5017,332 @@ new file mode 100644
 +    expect(screen.getByText('Running...')).toBeDefined()
 +  })
 +})
+diff --git a/packages/pg-meta/src/sql/studio/database/misc.ts b/packages/pg-meta/src/sql/studio/database/misc.ts
+index 76e1e251..91f4c20f 100644
+--- a/packages/pg-meta/src/sql/studio/database/misc.ts
++++ b/packages/pg-meta/src/sql/studio/database/misc.ts
+@@ -1,7 +1,7 @@
+ import { literal, safeSql, type SafeSqlFragment } from '../../../pg-format'
+ 
+ export const getDatabaseSizeSql = (): SafeSqlFragment => {
+-  return safeSql`select sum(pg_database_size(pg_database.datname))::bigint as db_size from pg_database;`
++  return safeSql`select pg_database_size(current_database())::bigint as db_size;`
+ }
+ 
+ export const getLiveTupleEstimate = (table: string, schema: string = 'public'): SafeSqlFragment => {
+diff --git a/apps/studio/components/interfaces/Storage/StorageMenuV2.tsx b/apps/studio/components/interfaces/Storage/StorageMenuV2.tsx
+index 65d3746b..6b11d7b3 100644
+--- a/apps/studio/components/interfaces/Storage/StorageMenuV2.tsx
++++ b/apps/studio/components/interfaces/Storage/StorageMenuV2.tsx
+@@ -26,7 +26,7 @@ export const StorageMenuV2 = () => {
+   const { ref } = useParams()
+   const page = useStorageV2Page()
+ 
+-  const { isCli, isPlatform } = useDeploymentMode()
++  const { isPlatform } = useDeploymentMode()
+ 
+   const { storageAnalytics, storageVectors } = useIsFeatureEnabled([
+     'storage:analytics',
+@@ -37,7 +37,8 @@ export const StorageMenuV2 = () => {
+   const isVectorBucketsEnabled = useIsVectorBucketsEnabled({ projectRef: ref })
+ 
+   const showAnalytics = isPlatform && storageAnalytics
+-  const showVectors = (isPlatform && storageVectors) || isCli
++  // Off-platform (CLI or multitenant self-hosted) Vectors is always available.
++  const showVectors = (isPlatform && storageVectors) || !isPlatform
+ 
+   useShortcut(SHORTCUT_IDS.NAV_STORAGE_FILES, () => router.push(`/project/${ref}/storage/files`))
+   useShortcut(
+diff --git a/apps/studio/components/interfaces/Storage/VectorBuckets/CreateVectorTableSheet.tsx b/apps/studio/components/interfaces/Storage/VectorBuckets/CreateVectorTableSheet.tsx
+index d642e0a5..ed015869 100644
+--- a/apps/studio/components/interfaces/Storage/VectorBuckets/CreateVectorTableSheet.tsx
++++ b/apps/studio/components/interfaces/Storage/VectorBuckets/CreateVectorTableSheet.tsx
+@@ -1,5 +1,4 @@
+ import { zodResolver } from '@hookform/resolvers/zod'
+-import { literal, safeSql } from '@supabase/pg-meta'
+ import { PermissionAction } from '@supabase/shared-types/out/constants'
+ import { Plus, Trash2 } from 'lucide-react'
+ import { parseAsBoolean, useQueryState } from 'nuqs'
+@@ -28,6 +27,8 @@ import { FormItemLayout } from 'ui-patterns/form/FormItemLayout/FormItemLayout'
+ import z from 'zod'
+ 
+ import { inverseValidBucketNameRegex } from '../CreateBucketModal.utils'
++import { getS3VectorsImportForeignSchemaParams } from './s3VectorsImportForeignSchema'
++import { useS3VectorsWrapperExtension } from './useS3VectorsWrapper'
+ import { useS3VectorsWrapperInstance } from './useS3VectorsWrapperInstance'
+ import { ButtonTooltip } from '@/components/ui/ButtonTooltip'
+ import { DocsButton } from '@/components/ui/DocsButton'
+@@ -105,7 +106,7 @@ interface CreateVectorTableSheetProps {
+ 
+ export const CreateVectorTableSheet = ({ bucketName }: CreateVectorTableSheetProps) => {
+   const { data: project } = useSelectedProjectQuery()
+-  const { isCli } = useDeploymentMode()
++  const { isPlatform } = useDeploymentMode()
+ 
+   const [visible, setVisible] = useQueryState(
+     'newTable',
+@@ -114,13 +115,15 @@ export const CreateVectorTableSheet = ({ bucketName }: CreateVectorTableSheetPro
+   const { can: canCreateBuckets } = useAsyncCheckPermissions(PermissionAction.STORAGE_WRITE, '*')
+ 
+   const { data: wrapperInstance } = useS3VectorsWrapperInstance({ bucketId: bucketName })
++  const { extension: wrappersExtension, state: wrappersExtensionState } =
++    useS3VectorsWrapperExtension()
+   const schema = (wrapperInstance?.server_options ?? [])
+     .find((x) => x.startsWith('supabase_target_schema'))
+     ?.split('supabase_target_schema=')[1]
+ 
+   // [Joshen] Can remove this once this restriction is removed
+   const showIndexCreationNotice =
+-    isStagingLocal && !isCli && !!project && project?.region !== 'us-east-1'
++    isPlatform && isStagingLocal && !!project && project?.region !== 'us-east-1'
+ 
+   const defaultValues = {
+     name: '',
+@@ -173,9 +176,11 @@ export const CreateVectorTableSheet = ({ bucketName }: CreateVectorTableSheetPro
+           projectRef: project.ref,
+           connectionString: project?.connectionString,
+           serverName: wrapperInstance.server_name,
+-          sourceSchema: schema,
+-          targetSchema: schema,
+-          schemaOptions: [safeSql`bucket_name ${literal(bucketName)}`],
++          ...getS3VectorsImportForeignSchemaParams({
++            installedVersion: wrappersExtension?.installed_version,
++            bucketName,
++            targetSchema: schema,
++          }),
+         })
+       }
+     } catch (error: any) {
+@@ -399,7 +404,7 @@ export const CreateVectorTableSheet = ({ bucketName }: CreateVectorTableSheetPro
+             form={formId}
+             type="submit"
+             loading={isCreating}
+-            disabled={isCreating || !bucketName}
++            disabled={isCreating || !bucketName || wrappersExtensionState === 'loading'}
+           >
+             Create
+           </Button>
+diff --git a/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketDetails/InitializeForeignSchemaDialog.tsx b/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketDetails/InitializeForeignSchemaDialog.tsx
+index a4531aee..e1350498 100644
+--- a/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketDetails/InitializeForeignSchemaDialog.tsx
++++ b/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketDetails/InitializeForeignSchemaDialog.tsx
+@@ -1,5 +1,4 @@
+ import { zodResolver } from '@hookform/resolvers/zod'
+-import { literal, safeSql } from '@supabase/pg-meta'
+ import { useQueryClient } from '@tanstack/react-query'
+ import { useParams } from 'common'
+ import { parseAsBoolean, useQueryState } from 'nuqs'
+@@ -24,6 +23,7 @@ import { FormItemLayout } from 'ui-patterns/form/FormItemLayout/FormItemLayout'
+ import z from 'zod'
+ 
+ import { getDecryptedParameters } from '../../Storage.utils'
++import { getS3VectorsImportForeignSchemaParams } from '../s3VectorsImportForeignSchema'
+ import { useS3VectorsWrapperExtension } from '../useS3VectorsWrapper'
+ import { useS3VectorsWrapperInstance } from '../useS3VectorsWrapperInstance'
+ import { formatWrapperTables } from '@/components/interfaces/Integrations/Wrappers/Wrappers.utils'
+@@ -35,7 +35,6 @@ import { useFDWUpdateMutation } from '@/data/fdw/fdw-update-mutation'
+ import { fdwKeys } from '@/data/fdw/keys'
+ import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
+ import { DOCS_URL } from '@/lib/constants'
+-import { isGreaterThanOrEqual } from '@/lib/semver'
+ 
+ // Create foreign tables for vector bucket
+ export const InitializeForeignSchemaDialog = () => {
+@@ -49,9 +48,6 @@ export const InitializeForeignSchemaDialog = () => {
+ 
+   const { data: wrapperInstance, meta: wrapperMeta } = useS3VectorsWrapperInstance({ bucketId })
+   const { extension: wrappersExtension } = useS3VectorsWrapperExtension()
+-  const updatedImportForeignSchemaSyntax = !!wrappersExtension?.installed_version
+-    ? isGreaterThanOrEqual(wrappersExtension.installed_version, '0.5.7')
+-    : false
+ 
+   const FormSchema = z.object({
+     schema: z
+@@ -114,11 +110,11 @@ export const InitializeForeignSchemaDialog = () => {
+         projectRef,
+         connectionString: project?.connectionString,
+         serverName: wrapperInstance.server_name,
+-        sourceSchema: updatedImportForeignSchemaSyntax ? bucketId : values.schema,
+-        targetSchema: values.schema,
+-        schemaOptions: updatedImportForeignSchemaSyntax
+-          ? undefined
+-          : [safeSql`bucket_name ${literal(bucketId)}`],
++        ...getS3VectorsImportForeignSchemaParams({
++          installedVersion: wrappersExtension?.installed_version,
++          bucketName: bucketId,
++          targetSchema: values.schema,
++        }),
+       })
+ 
+       toast.success(
+diff --git a/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketsErrorState.test.tsx b/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketsErrorState.test.tsx
+index 296c90ed..875e1958 100644
+--- a/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketsErrorState.test.tsx
++++ b/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketsErrorState.test.tsx
+@@ -30,14 +30,23 @@ describe('VectorBucketsErrorState', () => {
+     mockUseDeploymentMode.mockReset()
+   })
+ 
+-  test('CLI: shows the config.toml enable guidance, not the support error', () => {
++  test('CLI flag (self-hosted gateway): shows the real error, never the config.toml hint', () => {
+     mockUseDeploymentMode.mockReturnValue(deploymentMode({ isCli: true }))
+ 
+     customRender(<VectorBucketsErrorState error={new ResponseError('boom')} />)
+ 
+-    expect(screen.getByText('Vector buckets are not enabled')).toBeInTheDocument()
+-    expect(screen.getByText('supabase/config.toml')).toBeInTheDocument()
+-    expect(screen.queryByText('Contact support')).not.toBeInTheDocument()
++    expect(screen.getByText('Failed to retrieve vector buckets')).toBeInTheDocument()
++    expect(screen.queryByText('Vector buckets are not enabled')).not.toBeInTheDocument()
++    expect(screen.queryByText('supabase/config.toml')).not.toBeInTheDocument()
++  })
++
++  test('self-hosted: shows the real error', () => {
++    mockUseDeploymentMode.mockReturnValue(deploymentMode({ isSelfHosted: true }))
++
++    customRender(<VectorBucketsErrorState error={new ResponseError('boom')} />)
++
++    expect(screen.getByText('Failed to retrieve vector buckets')).toBeInTheDocument()
++    expect(screen.queryByText('supabase/config.toml')).not.toBeInTheDocument()
+   })
+ 
+   test('platform: shows the generic support error', () => {
+diff --git a/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketsErrorState.tsx b/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketsErrorState.tsx
+index 6bd95e67..6726d6e9 100644
+--- a/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketsErrorState.tsx
++++ b/apps/studio/components/interfaces/Storage/VectorBuckets/VectorBucketsErrorState.tsx
+@@ -1,16 +1,13 @@
+-import { VectorBucketsLocalDisabledState } from './VectorBucketsLocalDisabledState'
+ import AlertError from '@/components/ui/AlertError'
+-import { useDeploymentMode } from '@/hooks/misc/useDeploymentMode'
+ import type { ResponseError } from '@/types'
+ 
+ interface VectorBucketsErrorStateProps {
+   error: ResponseError | null
+ }
+ 
++// Multitenant self-hosted Studio is never driven by the Supabase CLI, so the
++// supabase/config.toml hint would be misleading here: always surface the real
++// error, even if the gateway still reports CLI deployment mode.
+ export const VectorBucketsErrorState = ({ error }: VectorBucketsErrorStateProps) => {
+-  const { isCli } = useDeploymentMode()
+-
+-  if (isCli) return <VectorBucketsLocalDisabledState />
+-
+   return <AlertError error={error} subject="Failed to retrieve vector buckets" />
+ }
+diff --git a/apps/studio/components/interfaces/Storage/VectorBuckets/s3VectorsImportForeignSchema.test.ts b/apps/studio/components/interfaces/Storage/VectorBuckets/s3VectorsImportForeignSchema.test.ts
+new file mode 100644
+index 00000000..61e82e7e
+--- /dev/null
++++ b/apps/studio/components/interfaces/Storage/VectorBuckets/s3VectorsImportForeignSchema.test.ts
+@@ -0,0 +1,35 @@
++import { describe, expect, test } from 'vitest'
++
++import {
++  getS3VectorsImportForeignSchemaParams,
++  hasUpdatedS3VectorsImportSyntax,
++} from './s3VectorsImportForeignSchema'
++
++describe('getS3VectorsImportForeignSchemaParams', () => {
++  test('wrappers >= 0.5.7 imports the bucket as the remote schema without bucket_name', () => {
++    expect(
++      getS3VectorsImportForeignSchemaParams({
++        installedVersion: '0.5.7',
++        bucketName: 'my_vectors',
++        targetSchema: 'vec',
++      })
++    ).toEqual({ sourceSchema: 'my_vectors', targetSchema: 'vec', schemaOptions: undefined })
++  })
++
++  test('older wrappers keep the bucket_name option', () => {
++    const params = getS3VectorsImportForeignSchemaParams({
++      installedVersion: '0.5.6',
++      bucketName: 'my_vectors',
++      targetSchema: 'vec',
++    })
++    expect(params.sourceSchema).toBe('vec')
++    expect(params.targetSchema).toBe('vec')
++    expect(params.schemaOptions).toHaveLength(1)
++  })
++
++  test('version detection', () => {
++    expect(hasUpdatedS3VectorsImportSyntax('0.6.0')).toBe(true)
++    expect(hasUpdatedS3VectorsImportSyntax('0.5.6')).toBe(false)
++    expect(hasUpdatedS3VectorsImportSyntax(undefined)).toBe(false)
++  })
++})
+diff --git a/apps/studio/components/interfaces/Storage/VectorBuckets/s3VectorsImportForeignSchema.ts b/apps/studio/components/interfaces/Storage/VectorBuckets/s3VectorsImportForeignSchema.ts
+new file mode 100644
+index 00000000..21b70b2c
+--- /dev/null
++++ b/apps/studio/components/interfaces/Storage/VectorBuckets/s3VectorsImportForeignSchema.ts
+@@ -0,0 +1,33 @@
++import { literal, safeSql, type SafeSqlFragment } from '@supabase/pg-meta'
++
++import { isGreaterThanOrEqual } from '@/lib/semver'
++
++// wrappers >= 0.5.7 imports a vector bucket by using the bucket name as the
++// remote schema; older versions take the bucket through a `bucket_name` option.
++export const S3_VECTORS_UPDATED_IMPORT_SYNTAX_VERSION = '0.5.7'
++
++export const hasUpdatedS3VectorsImportSyntax = (installedVersion?: string | null): boolean =>
++  !!installedVersion
++    ? isGreaterThanOrEqual(installedVersion, S3_VECTORS_UPDATED_IMPORT_SYNTAX_VERSION)
++    : false
++
++// Shared by the first exposure ("Query from Postgres") and by every vector table
++// created afterwards, so both always emit the same IMPORT FOREIGN SCHEMA shape.
++export const getS3VectorsImportForeignSchemaParams = ({
++  installedVersion,
++  bucketName,
++  targetSchema,
++}: {
++  installedVersion?: string | null
++  bucketName: string
++  targetSchema: string
++}): { sourceSchema: string; targetSchema: string; schemaOptions?: SafeSqlFragment[] } => {
++  const updatedImportForeignSchemaSyntax = hasUpdatedS3VectorsImportSyntax(installedVersion)
++  return {
++    sourceSchema: updatedImportForeignSchemaSyntax ? bucketName : targetSchema,
++    targetSchema,
++    schemaOptions: updatedImportForeignSchemaSyntax
++      ? undefined
++      : [safeSql`bucket_name ${literal(bucketName)}`],
++  }
++}
+diff --git a/apps/studio/data/config/project-storage-config-query.test.tsx b/apps/studio/data/config/project-storage-config-query.test.tsx
+index b0bdc646..acdf79c8 100644
+--- a/apps/studio/data/config/project-storage-config-query.test.tsx
++++ b/apps/studio/data/config/project-storage-config-query.test.tsx
+@@ -103,11 +103,11 @@ describe('useIsVectorBucketsEnabled', () => {
+     expect(result.current).toBe(true)
+   })
+ 
+-  test('self-hosted: false', () => {
++  test('self-hosted: true without the CLI deployment-mode flag', () => {
+     mockUseDeploymentMode.mockReturnValue(deploymentMode({ isSelfHosted: true }))
+ 
+     const { result } = customRenderHook(() => useIsVectorBucketsEnabled({ projectRef: 'default' }))
+ 
+-    expect(result.current).toBe(false)
++    expect(result.current).toBe(true)
+   })
+ })
+diff --git a/apps/studio/data/config/project-storage-config-query.ts b/apps/studio/data/config/project-storage-config-query.ts
+index 987a0bbe..6c16799d 100644
+--- a/apps/studio/data/config/project-storage-config-query.ts
++++ b/apps/studio/data/config/project-storage-config-query.ts
+@@ -61,8 +61,10 @@ export const useIsAnalyticsBucketsEnabled = ({ projectRef }: { projectRef?: stri
+ 
+ export const useIsVectorBucketsEnabled = ({ projectRef }: { projectRef?: string }) => {
+   const { data } = useProjectStorageConfigQuery({ projectRef })
+-  const { isCli, isPlatform } = useDeploymentMode()
++  const { isPlatform } = useDeploymentMode()
+ 
+-  const isVectorBucketsEnabled = isCli || (isPlatform && !!data?.features.vectorBuckets?.enabled)
++  // Multitenant self-hosted Studio provisions Vector Buckets for every project, so
++  // they are enabled off-platform regardless of the CLI deployment-mode flag.
++  const isVectorBucketsEnabled = !isPlatform || !!data?.features.vectorBuckets?.enabled
+   return isVectorBucketsEnabled
+ }

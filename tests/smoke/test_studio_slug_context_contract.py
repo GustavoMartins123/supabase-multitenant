@@ -165,6 +165,40 @@ class StudioSlugContextContractTest(unittest.TestCase):
         )
         self.assertNotIn("STUDIO_PROJECT_CONTEXT_MODE", env)
         self.assertIn("COPY nginx/lua/ /usr/local/openresty/lualib/", gateway_dockerfile)
+        self.assertIn(
+            "+  return safeSql`select pg_database_size(current_database())::bigint as db_size;`",
+            studio_patch,
+        )
+        # v21: enable Vector Buckets natively off-platform (no CLI mode hack),
+        # hide CLI-only config.toml/staging hints, and share the wrappers >= 0.5.7
+        # IMPORT FOREIGN SCHEMA syntax between first exposure and table creation.
+        self.assertIn(
+            "+  const isVectorBucketsEnabled = !isPlatform || !!data?.features.vectorBuckets?.enabled",
+            studio_patch,
+        )
+        self.assertIn(
+            "+  const showVectors = (isPlatform && storageVectors) || !isPlatform",
+            studio_patch,
+        )
+        self.assertIn(
+            "+    isPlatform && isStagingLocal && !!project && project?.region !== 'us-east-1'",
+            studio_patch,
+        )
+        self.assertIn(
+            "diff --git a/apps/studio/components/interfaces/Storage/VectorBuckets/s3VectorsImportForeignSchema.ts",
+            studio_patch,
+        )
+        self.assertIn(
+            "+          ...getS3VectorsImportForeignSchemaParams({",
+            studio_patch,
+        )
+        self.assertIn(
+            "-  if (isCli) return <VectorBucketsLocalDisabledState />",
+            studio_patch,
+        )
+        deps_patch = (ROOT / "studio/studio-slug/studio-security-deps.patch").read_text(encoding="utf-8")
+        self.assertIn("+  outputFileTracingIncludes: {", deps_patch)
+        self.assertIn("libpg-query/wasm/libpg-query.wasm", deps_patch)
 
     def test_installation_and_maintenance_share_the_published_image(self) -> None:
         import yaml
@@ -175,7 +209,7 @@ class StudioSlugContextContractTest(unittest.TestCase):
         self.assertNotIn("build", service)
         self.assertEqual(service["pull_policy"], "always")
         self.assertEqual(service["image"], maintenance["services"]["studio"]["image"])
-        self.assertTrue(service["image"].endswith(":20290c7-context-v19"))
+        self.assertTrue(service["image"].endswith(":20290c7-context-v21"))
         self.assertEqual(maintenance["services"]["studio"]["build"]["context"], "./studio-slug")
         self.assertEqual(set(maintenance["services"]), {"studio"})
 

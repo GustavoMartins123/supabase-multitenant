@@ -50,7 +50,8 @@ class StudioVectorCompatContractTest(unittest.TestCase):
         self.assertIn('add_header Cache-Control "no-store" always;', block)
         self.assertIn('ngx.req.get_method() ~= "GET"', block)
         self.assertIn('ngx.header["Allow"] = "GET"', block)
-        self.assertIn('ngx.say(\'{"is_cli_mode":true}\')', block)
+        self.assertIn('ngx.say(\'{"is_cli_mode":false}\')', block)
+        self.assertNotIn('"is_cli_mode":true', block)
         self.assertIn('application/json; charset=utf-8', block)
 
     def test_s3_keys_has_dedicated_location_before_projects_catch_all(self) -> None:
