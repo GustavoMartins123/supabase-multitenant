@@ -55,8 +55,15 @@ class F02SharedPasswordScope(unittest.TestCase):
     def test_project_dsns_go_through_the_pooler_with_scoped_roles(self) -> None:
         template = (ROOT / "servidor/generateProject/dockercomposetemplate").read_text(encoding="utf-8")
         nginx = (ROOT / "servidor/generateProject/nginxtemplate").read_text(encoding="utf-8")
-        self.assertIn("${AUTH_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}", template)
-        self.assertIn("${POSTGREST_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}", template)
+        self.assertIn(
+            "${AUTH_DB_USER}.{{project_id}}:${AUTH_DB_PASSWORD:?defina AUTH_DB_PASSWORD no .env do projeto}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}",
+            template,
+        )
+        self.assertIn(
+            "${POSTGREST_DB_USER}.{{project_id}}:${POSTGREST_DB_PASSWORD:?defina POSTGREST_DB_PASSWORD no .env do projeto}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}",
+            template,
+        )
+        self.assertNotIn("POSTGRES_PASSWORD", template)
         self.assertIn('default "supabase-pooler:${POOLER_PROXY_PORT_SESSION}";', nginx)
         self.assertIn('default "supabase-pooler:${POOLER_PROXY_PORT_TRANSACTION}";', nginx)
         self.assertNotIn("${POSTGRES_POOLER}", nginx)
@@ -66,10 +73,14 @@ class F02SharedPasswordScope(unittest.TestCase):
         source = (
             ROOT / "servidor/generateProject/lib/generate_project_impl.sh"
         ).read_text(encoding="utf-8")
-        self.assertIn("REVOKE CONNECT, TEMPORARY ON DATABASE $db FROM PUBLIC", source)
-        for role in ("pgbouncer", "authenticator", "supabase_storage_admin", "supabase_auth_admin"):
+        self.assertIn(
+            "REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE $db FROM PUBLIC, authenticator, supabase_auth_admin;",
+            source,
+        )
+        for role in ("pgbouncer", "supabase_storage_admin"):
             with self.subTest(role=role):
                 self.assertIn(f"TO {role};", source)
+        self.assertIn("provision_tenant_service_roles", source)
 
     def test_generated_passwords_are_url_safe(self) -> None:
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")

@@ -37,9 +37,28 @@ _TOC_EVENT_TRIGGER_RE = re.compile(
     r'(?:"([^"]+)"|([^\s]+))(?:\s|$)'
 )
 
+_TOC_TENANT_SERVICE_ACL_RE = re.compile(
+    r"^\d+;\s+\d+\s+\d+\s+(?:DEFAULT ACL|ACL)\s+.*?\btenant_(?:auth|rest)_[0-9a-f]{32}\b"
+)
+
 _SQL_EVENT_TRIGGER_STMT_RE = re.compile(
     r"^\s*(?:CREATE|ALTER|COMMENT\s+ON)\s+EVENT\s+TRIGGER\s+"
     r'(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_$]*)\b)',
+    re.IGNORECASE,
+)
+
+_SQL_TENANT_AUTH_OWNER_RE = re.compile(
+    r'^(?P<prefix>\s*ALTER\s+.+\s+OWNER\s+TO\s+)"?tenant_auth_[0-9a-f]{32}"?(?P<suffix>\s*;[^\r\n]*)(?P<eol>\r?\n?)$',
+    re.IGNORECASE,
+)
+
+_SQL_TENANT_DEFAULT_PRIV_RE = re.compile(
+    r'^\s*ALTER\s+DEFAULT\s+PRIVILEGES\s+FOR\s+ROLE\s+"?tenant_(?:auth|rest)_[0-9a-f]{32}"?(?:\s|$)',
+    re.IGNORECASE,
+)
+
+_SQL_TENANT_SERVICE_ACL_RE = re.compile(
+    r'^\s*(?:GRANT|REVOKE)\s+.+\s+(?:TO|FROM)\s+"?tenant_(?:auth|rest)_[0-9a-f]{32}"?(?:\s|;|$)',
     re.IGNORECASE,
 )
 
@@ -51,7 +70,9 @@ def is_excluded_toc_line(
     line: str,
     excluded: frozenset[str] = EXCLUDED_EVENT_TRIGGERS,
 ) -> bool:
-    """Return True if a `pg_restore -l` TOC line belongs to an excluded trigger."""
+    """Return True if a `pg_restore -l` TOC line belongs to an excluded trigger or tenant service ACL."""
+    if _TOC_TENANT_SERVICE_ACL_RE.match(line):
+        return True
     match = _TOC_EVENT_TRIGGER_RE.match(line)
     if not match:
         return False
@@ -239,6 +260,23 @@ def filter_plain_sql(
                             _advance_sql_line(remainder, state)
                             destination.write(remainder)
                     continue
+            if _SQL_TENANT_DEFAULT_PRIV_RE.match(line) or _SQL_TENANT_SERVICE_ACL_RE.match(line):
+                removed += 1
+                semi = _advance_sql_line(line, state, stop_at_semicolon=True)
+                if semi is None:
+                    skipping_stmt = True
+                else:
+                    remainder = line[semi + 1 :]
+                    if remainder.strip():
+                        _advance_sql_line(remainder, state)
+                        destination.write(remainder)
+                continue
+            owner_match = _SQL_TENANT_AUTH_OWNER_RE.match(line)
+            if owner_match:
+                line = (
+                    f"{owner_match.group('prefix')}supabase_auth_admin"
+                    f"{owner_match.group('suffix')}{owner_match.group('eol')}"
+                )
 
         _advance_sql_line(line, state)
         destination.write(line)

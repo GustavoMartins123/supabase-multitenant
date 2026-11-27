@@ -87,6 +87,31 @@ BEGIN
         EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_auth_admin IN SCHEMA auth GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON TABLES TO %I', tenant_role);
         EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_auth_admin IN SCHEMA auth GRANT USAGE, SELECT ON SEQUENCES TO %I', tenant_role);
     END IF;
+    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'auth') THEN
+        DECLARE
+            auth_service_role text := replace(tenant_role, 'tenant_meta_', 'tenant_auth_');
+            stale_auth_role text;
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN
+                FOR stale_auth_role IN
+                    SELECT DISTINCT r.rolname
+                    FROM pg_roles r
+                    WHERE r.rolname ~ '^tenant_auth_[0-9a-f]{32}$'
+                      AND (
+                          EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'auth' AND c.relowner = r.oid)
+                          OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'auth' AND p.proowner = r.oid)
+                          OR EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'auth' AND t.typowner = r.oid)
+                      )
+                LOOP
+                    EXECUTE format('REASSIGN OWNED BY %I TO supabase_auth_admin', stale_auth_role);
+                END LOOP;
+            END IF;
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = auth_service_role) THEN
+                EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA auth GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON TABLES TO %I', auth_service_role, tenant_role);
+                EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA auth GRANT USAGE, SELECT ON SEQUENCES TO %I', auth_service_role, tenant_role);
+            END IF;
+        END;
+    END IF;
     IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'storage')
        AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_storage_admin') THEN
         EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON TABLES TO %I', tenant_role);

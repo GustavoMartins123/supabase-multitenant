@@ -621,6 +621,43 @@ process.stdout.write(body);});'''
     assert sql('SELECT count(*) FROM vector_client_clone.p1_index;', clone_db) == '2'
     print('Real SigV4 gateway: valid signature accepted; forged signature and cross-tenant credential denied', flush=True)
     assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + copied) == 'original'
+    # T5: Per-tenant auth/rest DB credentials + cross-tenant DB login denial probe.
+    proj_env = environment(server / 'projects' / project / '.env')
+    clone_env = environment(server / 'projects' / copied / '.env')
+    first_hex, second_hex = first_uuid.replace('-', ''), second_uuid.replace('-', '')
+    assert proj_env['AUTH_DB_USER'] == f'tenant_auth_{first_hex}'
+    assert proj_env['POSTGREST_DB_USER'] == f'tenant_rest_{first_hex}'
+    assert clone_env['AUTH_DB_USER'] == f'tenant_auth_{second_hex}'
+    assert clone_env['POSTGREST_DB_USER'] == f'tenant_rest_{second_hex}'
+    assert len({
+        proj_env['AUTH_DB_PASSWORD'], proj_env['POSTGREST_DB_PASSWORD'],
+        clone_env['AUTH_DB_PASSWORD'], clone_env['POSTGREST_DB_PASSWORD'],
+        values['POSTGRES_PASSWORD'],
+    }) == 5
+    for target_ref in (project, copied):
+        compose_text = (server / 'projects' / target_ref / 'docker-compose.yml').read_text()
+        assert 'POSTGRES_PASSWORD' not in compose_text, target_ref
+        target_db = '_supabase_' + target_ref
+        assert sql("SELECT has_database_privilege('authenticator', current_database(), 'CONNECT');", target_db) == 'f'
+        assert sql("SELECT has_database_privilege('supabase_auth_admin', current_database(), 'CONNECT');", target_db) == 'f'
+
+    def probe_db_login(role: str, password: str, database: str) -> subprocess.CompletedProcess[str]:
+        probe_env = os.environ.copy()
+        probe_env['PGPASSWORD'] = password
+        return subprocess.run(
+            ['docker', 'exec', '-e', 'PGPASSWORD', 'supabase-db', 'psql', '-X', '-q', '-t', '-A',
+             '-h', '127.0.0.1', '-U', role, '-d', database, '-c', 'SELECT 1;'],
+            env=probe_env, capture_output=True, text=True, check=False,
+        )
+
+    for role_key, pass_key in (('AUTH_DB_USER', 'AUTH_DB_PASSWORD'), ('POSTGREST_DB_USER', 'POSTGREST_DB_PASSWORD')):
+        own = probe_db_login(proj_env[role_key], proj_env[pass_key], '_supabase_' + project)
+        assert own.returncode == 0 and own.stdout.strip() == '1', (role_key, own.stderr)
+        cross = probe_db_login(proj_env[role_key], proj_env[pass_key], clone_db)
+        assert cross.returncode != 0 and 'permission denied' in cross.stderr.lower(), (role_key, cross.stderr)
+        cp = probe_db_login(proj_env[role_key], proj_env[pass_key], 'postgres')
+        assert cp.returncode != 0 and 'permission denied' in cp.stderr.lower(), (role_key, cp.stderr)
+    print('T5 per-tenant auth/rest DB credentials and cross-tenant login denial verified', flush=True)
     job_id = str(uuid.uuid4())
     sql(f'''INSERT INTO jobs(job_id,project,project_uuid,created_by,action,status,public_ref,payload) VALUES('{job_id}','{project}','{first_uuid}','{owner}','rename','running','{public_refs[project]}','{{"actor_user_id":"{owner}","old_ref":"{public_refs[project]}","new_ref":"{new_ref}"}}'::jsonb);''')
     sql(f"INSERT INTO project_reference_history(project_id,old_ref,new_ref,status,actor_user_id,job_id) VALUES('{first_uuid}','{public_refs[project]}','{new_ref}','running','{owner}','{job_id}');")

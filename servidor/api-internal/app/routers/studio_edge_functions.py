@@ -586,6 +586,8 @@ def canonical_projection_credentials(project) -> dict[str, str]:
         'anon_key': str(projected.get('anon_key') or env.get('ANON_KEY_PROJETO') or ''),
         'service_role_key': str(projected.get('service_role_key') or env.get('SERVICE_ROLE_KEY_PROJETO') or ''),
         'postgres_password': str(env.get('POSTGRES_PASSWORD') or ''),
+        'auth_db_password': str(env.get('AUTH_DB_PASSWORD') or ''),
+        'postgrest_db_password': str(env.get('POSTGREST_DB_PASSWORD') or ''),
         'edge_gateway_token': str(projected.get('edge_gateway_token') or env.get('API_GATEWAY_TOKEN_PROJETO') or ''),
     }
 
@@ -598,7 +600,15 @@ def canonical_environment(project):
 def _collect_sensitive_values(project: dict, creds: dict[str, str], secrets: dict[str, str]) -> list[str]:
     excluded = {project['name'], project['public_ref'], identity(project)}
     values = [v for v in secrets.values() if isinstance(v, str) and len(v) >= 4 and v not in excluded]
-    for field in ('jwt_secret', 'anon_key', 'service_role_key', 'postgres_password', 'edge_gateway_token'):
+    for field in (
+        'jwt_secret',
+        'anon_key',
+        'service_role_key',
+        'postgres_password',
+        'auth_db_password',
+        'postgrest_db_password',
+        'edge_gateway_token',
+    ):
         val = creds.get(field, '')
         if isinstance(val, str) and len(val) >= 4 and val not in excluded:
             values.append(val)

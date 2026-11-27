@@ -389,6 +389,8 @@ async def ensure_platform_meta_admin_role(
                 GRANT pg_read_all_data TO platform_meta_admin;
                 GRANT EXECUTE ON FUNCTION public.drop_project_replication_slot(text,text)
                   TO platform_meta_admin;
+                GRANT EXECUTE ON FUNCTION public.drop_tenant_service_roles(uuid)
+                  TO platform_meta_admin;
 
                 DO $$
                 DECLARE
@@ -430,3 +432,67 @@ async def ensure_mailer_template_role(pool, *, password):
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute(role_sql(password))
+
+
+PLATFORM_READER_AUTH_USERS_COLUMNS: tuple[str, ...] = (
+    "id",
+    "email",
+    "phone",
+    "email_confirmed_at",
+    "created_at",
+    "last_sign_in_at",
+    "raw_user_meta_data",
+    "is_sso_user",
+)
+PLATFORM_READER_AUTH_SESSIONS_COLUMNS: tuple[str, ...] = (
+    "id",
+    "user_id",
+    "created_at",
+)
+
+
+async def ensure_platform_reader_grants(
+    pool: asyncpg.Pool, *, admin_dsn: str
+) -> None:
+    """Idempotently backfill strict column-level platform_reader grants on all tenant DBs."""
+    role_exists = await pool.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'platform_reader')"
+    )
+    if not role_exists:
+        return
+    rows = await pool.fetch("SELECT name FROM projects ORDER BY name")
+    if not rows:
+        return
+    users_cols = ", ".join(PLATFORM_READER_AUTH_USERS_COLUMNS)
+    sessions_cols = ", ".join(PLATFORM_READER_AUTH_SESSIONS_COLUMNS)
+    sql = f"""
+    DO $platform_reader_grants$
+    BEGIN
+        IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'auth') THEN
+            REVOKE ALL ON SCHEMA auth FROM platform_reader;
+            REVOKE ALL ON ALL TABLES IN SCHEMA auth FROM platform_reader;
+            GRANT USAGE ON SCHEMA auth TO platform_reader;
+            IF to_regclass('auth.users') IS NOT NULL THEN
+                REVOKE ALL ON TABLE auth.users FROM platform_reader;
+                GRANT SELECT ({users_cols}) ON auth.users TO platform_reader;
+            END IF;
+            IF to_regclass('auth.sessions') IS NOT NULL THEN
+                REVOKE ALL ON TABLE auth.sessions FROM platform_reader;
+                GRANT SELECT ({sessions_cols}) ON auth.sessions TO platform_reader;
+            END IF;
+        END IF;
+        EXECUTE format('GRANT CONNECT ON DATABASE %I TO platform_reader', current_database());
+    END
+    $platform_reader_grants$;
+    """
+    dsn = urlsplit(admin_dsn)
+    for row in rows:
+        tenant_dsn = urlunsplit(
+            dsn._replace(path="/" + quote("_supabase_" + row["name"], safe=""))
+        )
+        conn = await asyncpg.connect(tenant_dsn)
+        try:
+            async with conn.transaction():
+                await conn.execute(sql)
+        finally:
+            await conn.close()

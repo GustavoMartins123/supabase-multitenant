@@ -22,7 +22,7 @@ from app.service_key_cache import invalidate_service_key_cache
 from app.project_reference_jobs import rename_project_background as _rename_project_background
 from app.key_rotation import KeyRotationMetadataError, project_key_schedule
 from app.automatic_key_rotation import block_automatic_key_rotation
-from app.project_deletion import ProjectDeletionError, build_global_delete_token, build_realtime_delete_token, delete_realtime_tenant, delete_supavisor_tenant, drain_database_connections, drop_database_force, drop_supabase_replication_slots, global_admin_connection, load_project_environment, terminate_supavisor_pools
+from app.project_deletion import ProjectDeletionError, build_global_delete_token, build_realtime_delete_token, delete_realtime_tenant, delete_supavisor_tenant, drain_database_connections, drop_database_force, drop_supabase_replication_slots, drop_tenant_service_roles, global_admin_connection, load_project_environment, terminate_supavisor_pools
 from app.project_identity import ProjectIdentityError, get_job_project_identity as _get_job_project_identity, parse_tenant_uuid
 from app.database import get_pool
 from app.dependencies import ensure_project_member_access
@@ -761,6 +761,7 @@ async def _delete_project_impl(
             errors.extend(f"slots: {item}" for item in slot_errors)
             if not slot_errors:
                 await drop_database_force(conn, db_name)
+                await drop_tenant_service_roles(conn, tenant_uuid)
     except Exception as exc:
         errors.append(f"database: {exc}")
 

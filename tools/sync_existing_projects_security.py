@@ -14,16 +14,19 @@ and `--dry-run` (the default) previews every planned change first.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from datetime import datetime, timezone
 import difflib
 import importlib.util
 import os
 from pathlib import Path
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
 from types import ModuleType
+import uuid
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROJECTS_DIR = REPO_ROOT / "servidor" / "projects"
@@ -32,6 +35,14 @@ DEFAULT_TEMPLATES_DIR = REPO_ROOT / "servidor" / "generateProject"
 
 PROJECT_SLUG_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
 ENV_LINE_RE = re.compile(r"^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+TENANT_SERVICE_PASSWORD_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
+ENV_DIFF_SECRET_LINE_RE = re.compile(
+    r"^([+-][ \t]*(?:export[ \t]+)?[A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|KEY)[A-Z0-9_]*=).+$"
+)
+AUTH_DB_PASSWORD_INTERP = "${AUTH_DB_PASSWORD:?defina AUTH_DB_PASSWORD no .env do projeto}"
+POSTGREST_DB_PASSWORD_INTERP = (
+    "${POSTGREST_DB_PASSWORD:?defina POSTGREST_DB_PASSWORD no .env do projeto}"
+)
 REDUNDANT_ENV_FILES = frozenset({"../../.env", ".env", "./.env"})
 TARGET_SERVICES = ("nginx", "auth", "rest")
 
@@ -746,6 +757,97 @@ def _rewrite_service_upstreams(lines: list[str], service_name: str, slug: str) -
     return updated
 
 
+def _rewrite_service_db_credentials(
+    lines: list[str],
+    service_name: str,
+    env_key: str,
+    user_interp: str,
+    legacy_user: str,
+    password_interp: str,
+) -> list[str]:
+    """Replace global ${POSTGRES_PASSWORD} (and hardcoded global DB role) in tenant auth/rest DSNs."""
+    bounds = _service_bounds(lines, service_name)
+    if bounds is None:
+        return lines
+    svc_idx, svc_end, _svc_indent = bounds
+    key_re = re.compile(rf"^\s+(?:-\s*(?:[\"'])?)?{re.escape(env_key)}(?:\s*:|=)")
+    updated = list(lines)
+    for i in range(svc_idx + 1, svc_end):
+        line = updated[i]
+        if _is_blank_or_comment(line) or not key_re.match(line):
+            continue
+        line = re.sub(
+            rf"postgres://{re.escape(legacy_user)}\.",
+            f"postgres://{user_interp}.",
+            line,
+        )
+        line = re.sub(
+            r":\$\{POSTGRES_PASSWORD(?:[:?-][^}]*)?\}@",
+            f":{password_interp}@",
+            line,
+        )
+        updated[i] = line
+    return updated
+
+
+def _mint_distinct_service_password(*avoid: str) -> str:
+    forbidden = set(avoid)
+    while True:
+        candidate = secrets.token_urlsafe(32)
+        if TENANT_SERVICE_PASSWORD_RE.fullmatch(candidate) and candidate not in forbidden:
+            return candidate
+
+
+def provision_project_db_service_roles(
+    templates_dir: Path,
+    slug: str,
+    project_uuid: str,
+    auth_password: str,
+    rest_password: str,
+) -> None:
+    """Provision tenant_auth_<uuid32>/tenant_rest_<uuid32> and revoke global CONNECT on _supabase_<slug>."""
+    if not PROJECT_SLUG_RE.fullmatch(slug):
+        raise RuntimeError(f"Invalid project slug: {slug}")
+    normalized_uuid = str(uuid.UUID(project_uuid)).lower()
+    if not TENANT_SERVICE_PASSWORD_RE.fullmatch(auth_password) or not TENANT_SERVICE_PASSWORD_RE.fullmatch(
+        rest_password
+    ):
+        raise RuntimeError(f"Invalid tenant service DB password for {slug}")
+    if auth_password == rest_password:
+        raise RuntimeError(f"Auth and PostgREST DB passwords must be distinct for {slug}")
+    helper_path = templates_dir / "lib" / "tenant_service_roles.sh"
+    if not helper_path.is_file():
+        helper_path = DEFAULT_TEMPLATES_DIR / "lib" / "tenant_service_roles.sh"
+    if not helper_path.is_file():
+        raise RuntimeError(f"Tenant service roles helper not found: {helper_path}")
+
+    env = os.environ.copy()
+    env["SYNC_TENANT_AUTH_PASSWORD"] = auth_password
+    env["SYNC_TENANT_REST_PASSWORD"] = rest_password
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'set -euo pipefail; source "$1"; '
+            'provision_tenant_service_roles "$2" "$3" '
+            '"$SYNC_TENANT_AUTH_PASSWORD" "$SYNC_TENANT_REST_PASSWORD"',
+            "bash",
+            str(helper_path),
+            f"_supabase_{slug}",
+            normalized_uuid,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if completed.returncode != 0:
+        err = (completed.stderr or "").strip().splitlines()
+        detail = err[-1] if err else f"exit code {completed.returncode}"
+        raise RuntimeError(f"Failed to provision tenant DB service roles for {slug}: {detail}")
+
+
 def _ensure_top_level_networks(
     lines: list[str], slug: str, keep_retired: tuple[str, ...] = ()
 ) -> list[str]:
@@ -812,8 +914,9 @@ def render_project_compose(
     *,
     proj_env_readable: bool = True,
     segregate_networks: bool = False,
+    migrate_db_credentials: bool = False,
 ) -> str:
-    """Surgically apply SEC-11 hardening while preserving per-project customizations (e.g. auth hooks)."""
+    """Surgically apply SEC-11 and T5 hardening while preserving per-project customizations."""
     del template_text, server_env, proj_env, proj_env_readable
     if not PROJECT_SLUG_RE.fullmatch(slug):
         raise ValueError(f"Invalid project slug: {slug}")
@@ -824,6 +927,24 @@ def render_project_compose(
 
     nginx_env = SEC11_NGINX_ENV if segregate_networks else REQUIRED_NGINX_ENV
     lines = _ensure_service_env_vars(lines, "nginx", nginx_env)
+
+    if migrate_db_credentials:
+        lines = _rewrite_service_db_credentials(
+            lines,
+            "auth",
+            "GOTRUE_DB_DATABASE_URL",
+            "${AUTH_DB_USER}",
+            "supabase_auth_admin",
+            AUTH_DB_PASSWORD_INTERP,
+        )
+        lines = _rewrite_service_db_credentials(
+            lines,
+            "rest",
+            "PGRST_DB_URI",
+            "${POSTGREST_DB_USER}",
+            "authenticator",
+            POSTGREST_DB_PASSWORD_INTERP,
+        )
 
     if segregate_networks:
         for retired_key in RETIRED_SEC11_NGINX_ENV:
@@ -1293,6 +1414,12 @@ def _diff_counts(old: str, new: str) -> tuple[int, int]:
     return plus, minus
 
 
+def _redact_diff_line(line: str, path: Path) -> str:
+    if path.name != ".env" or line.startswith(("+++", "---")):
+        return line
+    return ENV_DIFF_SECRET_LINE_RE.sub(r"\1<REDACTED>", line)
+
+
 def _print_diff(old: str, new: str, path: Path, limit: int = 80) -> None:
     shown = 0
     for line in difflib.unified_diff(
@@ -1306,7 +1433,7 @@ def _print_diff(old: str, new: str, path: Path, limit: int = 80) -> None:
         if shown >= limit:
             print(f"      [...] diff for {path.name} truncated at {limit} lines")
             return
-        print(f"      {line}")
+        print(f"      {_redact_diff_line(line, path)}")
         shown += 1
 
 
@@ -1320,6 +1447,9 @@ def sync_projects(
     skip_compose_validate: bool = False,
     sync_nginx: bool = False,
     segregate_networks: bool = False,
+    migrate_db_credentials: bool = False,
+    skip_db_provision: bool = False,
+    db_provisioner: Callable[[str, str, str, str], None] | None = None,
     force_templates: bool = False,
     show_diff: bool = False,
     template_history: dict[str, list[tuple[str, str]]] | None = None,
@@ -1372,9 +1502,11 @@ def sync_projects(
 
         existing_env_bytes = env_path.read_bytes() if proj_readable else b""
         desired_env_bytes = existing_env_bytes
+        env_updates: dict[str, str] = {}
+        env_missing_data_error: str | None = None
+        db_credentials_to_provision: tuple[str, str, str] | None = None
         if segregate_networks and proj_readable:
             subnet_allocator = _load_subnet_allocator(templates_dir)
-            env_updates: dict[str, str] = {}
             subnet = proj_env.get("PROJECT_INTERNAL_SUBNET", "").strip()
             if not subnet:
                 subnet = str(
@@ -1388,10 +1520,47 @@ def sync_projects(
                 env_updates["PROJECT_INTERNAL_SUBNET"] = subnet
                 proj_env["PROJECT_INTERNAL_SUBNET"] = subnet
             allocated_cidrs.add(subnet)
-            if env_updates:
-                desired_env_bytes = _upsert_env_text(
-                    existing_env_bytes.decode("utf-8"), env_updates
-                ).encode("utf-8")
+
+        if migrate_db_credentials:
+            if not proj_readable:
+                env_missing_data_error = "Cannot migrate DB credentials: .env is unreadable"
+            else:
+                raw_uuid = proj_env.get("PROJECT_UUID", "").strip().lower()
+                parsed_uuid: uuid.UUID | None = None
+                if raw_uuid:
+                    try:
+                        parsed_uuid = uuid.UUID(raw_uuid)
+                    except ValueError:
+                        parsed_uuid = None
+                if parsed_uuid is None:
+                    env_missing_data_error = (
+                        f"Cannot migrate DB credentials for {slug}: missing or invalid PROJECT_UUID"
+                    )
+                else:
+                    expected_auth_user = f"tenant_auth_{parsed_uuid.hex}"
+                    expected_rest_user = f"tenant_rest_{parsed_uuid.hex}"
+                    if proj_env.get("AUTH_DB_USER", "").strip() != expected_auth_user:
+                        env_updates["AUTH_DB_USER"] = expected_auth_user
+                        proj_env["AUTH_DB_USER"] = expected_auth_user
+                    if proj_env.get("POSTGREST_DB_USER", "").strip() != expected_rest_user:
+                        env_updates["POSTGREST_DB_USER"] = expected_rest_user
+                        proj_env["POSTGREST_DB_USER"] = expected_rest_user
+                    auth_pwd = proj_env.get("AUTH_DB_PASSWORD", "").strip()
+                    if not TENANT_SERVICE_PASSWORD_RE.fullmatch(auth_pwd):
+                        auth_pwd = _mint_distinct_service_password()
+                        env_updates["AUTH_DB_PASSWORD"] = auth_pwd
+                        proj_env["AUTH_DB_PASSWORD"] = auth_pwd
+                    rest_pwd = proj_env.get("POSTGREST_DB_PASSWORD", "").strip()
+                    if not TENANT_SERVICE_PASSWORD_RE.fullmatch(rest_pwd) or rest_pwd == auth_pwd:
+                        rest_pwd = _mint_distinct_service_password(auth_pwd)
+                        env_updates["POSTGREST_DB_PASSWORD"] = rest_pwd
+                        proj_env["POSTGREST_DB_PASSWORD"] = rest_pwd
+                    db_credentials_to_provision = (str(parsed_uuid), auth_pwd, rest_pwd)
+
+        if env_updates and proj_readable:
+            desired_env_bytes = _upsert_env_text(
+                existing_env_bytes.decode("utf-8"), env_updates
+            ).encode("utf-8")
 
         try:
             existing_compose_bytes = compose_path.read_bytes()
@@ -1423,6 +1592,7 @@ def sync_projects(
             proj_env,
             proj_env_readable=proj_readable,
             segregate_networks=segregate_networks,
+            migrate_db_credentials=migrate_db_credentials,
         )
         desired_compose_bytes = desired_compose_text.encode("utf-8")
         compose_blocked = compose_status in COMPOSE_BLOCKING
@@ -1431,7 +1601,19 @@ def sync_projects(
 
         # (path, relative_name, status, current_bytes, final_bytes, mode, note)
         rows: list[tuple[Path, str, str, bytes | None, bytes | None, int, str]] = []
-        if desired_env_bytes != existing_env_bytes:
+        if env_missing_data_error is not None:
+            rows.append(
+                (
+                    env_path,
+                    ".env",
+                    "missing-data",
+                    existing_env_bytes,
+                    existing_env_bytes,
+                    env_path.stat().st_mode & 0o777 if proj_readable else 0o600,
+                    env_missing_data_error,
+                )
+            )
+        elif desired_env_bytes != existing_env_bytes:
             plus, minus = _diff_counts(
                 existing_env_bytes.decode("utf-8"), desired_env_bytes.decode("utf-8")
             )
@@ -1603,6 +1785,19 @@ def sync_projects(
             if env_candidate_path is not None:
                 env_candidate_path.unlink(missing_ok=True)
 
+        if (
+            migrate_db_credentials
+            and db_credentials_to_provision is not None
+            and not skip_db_provision
+        ):
+            target_uuid, auth_pwd, rest_pwd = db_credentials_to_provision
+            if db_provisioner is not None:
+                db_provisioner(slug, target_uuid, auth_pwd, rest_pwd)
+            else:
+                provision_project_db_service_roles(
+                    templates_dir, slug, target_uuid, auth_pwd, rest_pwd
+                )
+
         written_targets: list[tuple[Path, bytes | None, int]] = []
         try:
             for target, _name, _status, old_bytes, new_bytes, mode, _note in writes:
@@ -1711,6 +1906,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Apply SEC-11 project-gateways and per-project network segregation (enabled by default unless --compose-only is set)",
     )
+    parser.add_argument(
+        "--migrate-db-credentials",
+        action="store_true",
+        help="Provision per-tenant tenant_auth_*/tenant_rest_* credentials and remove ${POSTGRES_PASSWORD} from project compose (enabled by default unless --compose-only is set)",
+    )
+    parser.add_argument(
+        "--skip-db-provision",
+        action="store_true",
+        help="Skip live PostgreSQL role provisioning via supabase-db (for offline/unit tests)",
+    )
     return parser
 
 
@@ -1728,6 +1933,8 @@ def main(argv: list[str] | None = None) -> int:
             skip_compose_validate=bool(args.skip_compose_validate),
             sync_nginx=bool(args.sync_nginx or full),
             segregate_networks=bool(args.segregate_networks or full),
+            migrate_db_credentials=bool(args.migrate_db_credentials or full),
+            skip_db_provision=bool(args.skip_db_provision),
             force_templates=bool(args.force_templates),
             show_diff=bool(args.diff),
         )
