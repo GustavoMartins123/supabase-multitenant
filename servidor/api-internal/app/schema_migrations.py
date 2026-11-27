@@ -363,6 +363,9 @@ async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
             print("[migrations] identidade mailer_template_service provisionada")
             await ensure_tenant_meta_roles(pool, admin_dsn=_require_dsn(), password=meta_admin_password)
             print("[migrations] identidades SQL por tenant provisionadas")
+            from app.control_plane_roles import ensure_platform_reader_grants
+            await ensure_platform_reader_grants(pool, admin_dsn=_require_dsn())
+            print("[migrations] grants por coluna do platform_reader sincronizados")
     finally:
         await pool.close()
     return 0

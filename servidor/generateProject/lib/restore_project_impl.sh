@@ -26,6 +26,7 @@ source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
+source "$SCRIPT_DIR/lib/tenant_service_roles.sh"
 source "$SCRIPT_DIR/lib/project_public_ref.sh"
 source "$SCRIPT_DIR/lib/protected_databases.sh"
 
@@ -71,6 +72,18 @@ PROJECT_PUBLIC_REF="$(project_public_ref_read "$PROJECT_DIR/.env")" \
 project_public_ref_assert "$PROJECT" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" \
   || die "Referencia publica diverge do control plane"
 [[ "$PROJECT_UUID" =~ $UUID_RE ]] || die "PROJECT_UUID invalido"
+EXPECTED_AUTH_DB_USER="$(tenant_auth_role_name "$PROJECT_UUID")" || die "PROJECT_UUID invalido"
+EXPECTED_POSTGREST_DB_USER="$(tenant_rest_role_name "$PROJECT_UUID")" || die "PROJECT_UUID invalido"
+[[ "${AUTH_DB_USER:-}" == "$EXPECTED_AUTH_DB_USER" ]] \
+  || die "AUTH_DB_USER ausente ou divergente no .env do projeto; execute tools/sync_existing_projects_security.py --apply"
+[[ "${POSTGREST_DB_USER:-}" == "$EXPECTED_POSTGREST_DB_USER" ]] \
+  || die "POSTGREST_DB_USER ausente ou divergente no .env do projeto; execute tools/sync_existing_projects_security.py --apply"
+validate_tenant_service_password "${AUTH_DB_PASSWORD:-}" \
+  || die "AUTH_DB_PASSWORD ausente ou invalida no .env do projeto"
+validate_tenant_service_password "${POSTGREST_DB_PASSWORD:-}" \
+  || die "POSTGREST_DB_PASSWORD ausente ou invalida no .env do projeto"
+[[ "$AUTH_DB_PASSWORD" != "$POSTGREST_DB_PASSWORD" ]] \
+  || die "AUTH_DB_PASSWORD e POSTGREST_DB_PASSWORD nao podem ser identicas"
 export PROJECT_UUID SERVICE_ROLE_KEY_PROJETO S3_PROTOCOL_CREDENTIAL_ID \
   S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET VECTOR_BUCKETS_ENABLED
 storage_validate_bool VECTOR_BUCKETS_ENABLED "$VECTOR_BUCKETS_ENABLED" \
@@ -276,7 +289,7 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c
   "CREATE DATABASE $DB;"
 NEW_DB_CREATED=1
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
-  "REVOKE CONNECT, TEMPORARY ON DATABASE $DB FROM PUBLIC;"
+  "REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE $DB FROM PUBLIC, authenticator, supabase_auth_admin;"
 
 echo "HOST_AGENT_PROGRESS=restore:restore_database"
 say "Restaurando dump do banco..."
@@ -340,8 +353,12 @@ if [[ -n "$REALTIME_TABLES" ]]; then
 fi
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
-  "GRANT CONNECT, TEMPORARY ON DATABASE $DB TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $DB TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $DB TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $DB TO supabase_auth_admin;"
-  provision_platform_reader "$DB"
+  "REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE $DB FROM PUBLIC, authenticator, supabase_auth_admin; GRANT CONNECT, TEMPORARY ON DATABASE $DB TO pgbouncer; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $DB TO supabase_storage_admin;"
+provision_tenant_service_roles "$DB" "$PROJECT_UUID" "$AUTH_DB_PASSWORD" "$POSTGREST_DB_PASSWORD" \
+  || die "Falha ao reprovisionar roles de servico isoladas apos restore"
+reassign_tenant_auth_objects_to_auth_admin "$DB" \
+  || die "Falha ao normalizar ownership de objetos Auth apos restore"
+provision_platform_reader_role
 
 vector_validate_database "$DB" || die "Banco restaurado sem contrato pgvector valido"
 
@@ -414,6 +431,10 @@ storage_assert_project_gateway "$PROJECT_UUID" "$PROJECT" "$SERVICE_ROLE_KEY_PRO
 echo "HOST_AGENT_PROGRESS=restore:configure_wrappers"
 vector_sync_project_wrappers "$PROJECT" || die "Falha ao sincronizar wrappers vetoriais"
 echo "HOST_AGENT_PROGRESS=restore:configure_identity"
+grant_platform_reader_on_tenant "$DB" \
+  || die "Falha ao conceder leitura de telemetria ao platform_reader apos restore"
+reassign_tenant_auth_objects_to_auth_admin "$DB" \
+  || die "Falha ao normalizar ownership de objetos Auth apos restore"
 provision_tenant_meta_role "$DB" "$PROJECT_UUID" \
   || die "Falha ao provisionar identidade SQL isolada apos restore"
 

@@ -17,6 +17,7 @@ import os
 import pathlib
 import time
 import urllib.parse
+import uuid
 from collections.abc import Mapping
 
 import asyncpg
@@ -307,3 +308,9 @@ async def drop_database_force(conn: asyncpg.Connection, db_name: str) -> None:
     assert_project_database_droppable(db_name)
     quoted_db = '"' + db_name.replace('"', '""') + '"'
     await conn.execute(f"DROP DATABASE IF EXISTS {quoted_db} WITH (FORCE)")
+
+
+async def drop_tenant_service_roles(
+    conn: asyncpg.Connection, tenant_uuid: uuid.UUID
+) -> None:
+    await conn.execute("SELECT public.drop_tenant_service_roles($1)", tenant_uuid)

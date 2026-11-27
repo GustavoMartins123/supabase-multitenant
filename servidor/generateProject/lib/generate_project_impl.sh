@@ -28,12 +28,14 @@ source "$SCRIPT_DIR/lib/resource_profiles.sh"
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
+source "$SCRIPT_DIR/lib/tenant_service_roles.sh"
 source "$SCRIPT_DIR/lib/project_public_ref.sh"
 source "$SCRIPT_DIR/lib/protected_databases.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.generate_transaction_$$"
 CREATED_DIRS=()
 CREATED_DB=""
+CREATED_SERVICE_ROLES_UUID=""
 CREATED_REALTIME_TENANT=""
 CREATED_SUPAVISOR_TENANT=""
 CREATED_STORAGE_TENANT=""
@@ -46,6 +48,7 @@ init_transaction() {
 
 register_created_dir() { CREATED_DIRS+=("$1"); }
 register_created_db() { CREATED_DB="$1"; }
+register_created_service_roles() { CREATED_SERVICE_ROLES_UUID="$1"; }
 register_realtime_tenant() { CREATED_REALTIME_TENANT="$1"; }
 register_supavisor_tenant() { CREATED_SUPAVISOR_TENANT="$1"; }
 register_storage_tenant() { CREATED_STORAGE_TENANT="$1"; }
@@ -161,7 +164,14 @@ rollback_transaction() {
     fi
   fi
   if [[ -n "$CREATED_DB" && -z "$CREATED_STORAGE_TENANT" ]]; then
-    drop_project_database "$CREATED_DB" || rollback_failed=1
+    if drop_project_database "$CREATED_DB"; then
+      CREATED_DB=""
+    else
+      rollback_failed=1
+    fi
+  fi
+  if [[ -n "$CREATED_SERVICE_ROLES_UUID" && -z "$CREATED_DB" && -z "$CREATED_STORAGE_TENANT" ]]; then
+    drop_tenant_service_roles "$CREATED_SERVICE_ROLES_UUID" || rollback_failed=1
   fi
   if [[ -z "$CREATED_STORAGE_TENANT" ]]; then
     for ((idx=${#CREATED_DIRS[@]}-1; idx>=0; idx--)); do
@@ -263,7 +273,10 @@ generate_db() {
     "CREATE DATABASE $db TEMPLATE _supabase_template;"
   register_created_db "$db"
   docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
-    "REVOKE CONNECT, TEMPORARY ON DATABASE $db FROM PUBLIC; GRANT CONNECT, TEMPORARY ON DATABASE $db TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $db TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_auth_admin;"
+    "REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE $db FROM PUBLIC, authenticator, supabase_auth_admin; GRANT CONNECT, TEMPORARY ON DATABASE $db TO pgbouncer; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_storage_admin;"
+  register_created_service_roles "$PROJECT_UUID"
+  provision_tenant_service_roles "$db" "$PROJECT_UUID" "$AUTH_DB_PASSWORD" "$POSTGREST_DB_PASSWORD" \
+    || die "Falha ao provisionar roles de servico isoladas do projeto"
   docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
     "ALTER ROLE supabase_storage_admin IN DATABASE $db SET search_path = storage, public;"
   provision_platform_reader_role
@@ -333,6 +346,15 @@ cleanup_stale_state() {
       return 1
     fi
   fi
+  if [[ -n "$old_uuid" ]]; then
+    drop_tenant_service_roles "$(tr '[:upper:]' '[:lower:]' <<<"$old_uuid")" \
+      || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_service_roles" >&2; return 1; }
+  fi
+  for stale_uuid in "${STALE_TENANT_UUIDS[@]}"; do
+    [[ "${stale_uuid,,}" == "${old_uuid,,}" ]] && continue
+    drop_tenant_service_roles "${stale_uuid,,}" \
+      || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_service_roles" >&2; return 1; }
+  done
   if [[ -e "$OUT_DIR" ]]; then
     rm -rf "$OUT_DIR" \
       || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_files" >&2; return 1; }
@@ -374,6 +396,10 @@ template_to_file() {
     -e "s|{{s3_protocol_credential_id}}|$(escape_sed_replacement "$S3_PROTOCOL_CREDENTIAL_ID")|g" \
     -e "s|{{s3_protocol_access_key_id}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_ID")|g" \
     -e "s|{{s3_protocol_access_key_secret}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_SECRET")|g" \
+    -e "s|{{auth_db_user}}|$(escape_sed_replacement "$AUTH_DB_USER")|g" \
+    -e "s|{{auth_db_password}}|$(escape_sed_replacement "$AUTH_DB_PASSWORD")|g" \
+    -e "s|{{postgrest_db_user}}|$(escape_sed_replacement "$POSTGREST_DB_USER")|g" \
+    -e "s|{{postgrest_db_password}}|$(escape_sed_replacement "$POSTGREST_DB_PASSWORD")|g" \
     "$template" > "$output"
 }
 
@@ -422,6 +448,16 @@ supavisor_tenant() {
 }
 
 JWT_SECRET_PROJETO=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n\r')
+AUTH_DB_USER="$(tenant_auth_role_name "$PROJECT_UUID")" \
+  || die "Falha ao derivar role Auth do projeto"
+POSTGREST_DB_USER="$(tenant_rest_role_name "$PROJECT_UUID")" \
+  || die "Falha ao derivar role PostgREST do projeto"
+AUTH_DB_PASSWORD="$(generate_tenant_service_password)" \
+  || die "Falha ao gerar senha da role Auth do projeto"
+POSTGREST_DB_PASSWORD="$(generate_tenant_service_password)" \
+  || die "Falha ao gerar senha da role PostgREST do projeto"
+[[ "$AUTH_DB_PASSWORD" != "$POSTGREST_DB_PASSWORD" ]] \
+  || die "Senhas das roles Auth e PostgREST nao podem ser identicas"
 now_epoch=$(date +%s)
 exp=$((now_epoch + (3 * 30 * 24 * 3600)))
 ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
@@ -525,6 +561,8 @@ echo "HOST_AGENT_PROGRESS=create:storage_verified"
 echo "HOST_AGENT_PROGRESS=create:identity_started"
 grant_platform_reader_on_tenant "_supabase_$PROJECT_ID" \
   || die "Falha ao conceder leitura de telemetria ao platform_reader"
+reassign_tenant_auth_objects_to_auth_admin "_supabase_$PROJECT_ID" \
+  || die "Falha ao normalizar ownership de objetos Auth do projeto"
 provision_tenant_meta_role "_supabase_$PROJECT_ID" "$PROJECT_UUID" \
   || die "Falha ao provisionar identidade SQL isolada do projeto"
 

@@ -93,7 +93,7 @@ services:
       API_EXTERNAL_URL: ${API_EXTERNAL_URL}
 
       GOTRUE_DB_DRIVER: ${GOTRUE_DB_DRIVER}
-      GOTRUE_DB_DATABASE_URL: postgres://${AUTH_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
+      GOTRUE_DB_DATABASE_URL: postgres://${AUTH_DB_USER}.{{project_id}}:${AUTH_DB_PASSWORD:?defina AUTH_DB_PASSWORD no .env do projeto}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
 
       GOTRUE_SITE_URL: ${SITE_URL}
       GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
@@ -186,7 +186,7 @@ services:
     #   analytics:
     #     condition: service_healthy
     environment:
-      PGRST_DB_URI: postgres://${POSTGREST_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
+      PGRST_DB_URI: postgres://${POSTGREST_DB_USER}.{{project_id}}:${POSTGREST_DB_PASSWORD:?defina POSTGREST_DB_PASSWORD no .env do projeto}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
       PGRST_DB_SCHEMA_CACHE_DURATION: ${PGRST_DB_SCHEMA_CACHE_DURATION}
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
       PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE}

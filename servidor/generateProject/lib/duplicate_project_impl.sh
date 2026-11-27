@@ -14,6 +14,7 @@ source "$SCRIPT_DIR/lib/resource_profiles.sh"
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
+source "$SCRIPT_DIR/lib/tenant_service_roles.sh"
 source "$SCRIPT_DIR/lib/project_public_ref.sh"
 source "$SCRIPT_DIR/lib/protected_databases.sh"
 # shellcheck disable=SC1091
@@ -77,6 +78,7 @@ RT_STRUCTURE_FILE="$TMP_DIR/realtime-structure.sql"
 RT_MIGRATIONS_FILE="$TMP_DIR/realtime-migrations.sql"
 
 CREATED_DB=0
+CREATED_SERVICE_ROLES=0
 CREATED_DIR=0
 CREATED_REALTIME=0
 CREATED_SUPAVISOR=0
@@ -182,7 +184,14 @@ rollback() {
     remaining="$(docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin \
       -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$NEW_DB';" \
       | tr -d '[:space:]')" || rollback_failed=1
-    [[ "$remaining" == "0" ]] || rollback_failed=1
+    if [[ "$remaining" == "0" ]]; then
+      CREATED_DB=0
+    else
+      rollback_failed=1
+    fi
+  fi
+  if [[ "$CREATED_SERVICE_ROLES" -eq 1 && "$CREATED_DB" -eq 0 && "$CREATED_STORAGE" -eq 0 ]]; then
+    drop_tenant_service_roles "$PROJECT_UUID" || rollback_failed=1
   fi
   if [[ "$CREATED_DIR" -eq 1 && "$CREATED_STORAGE" -eq 0 ]]; then
     rm -rf "$OUT_DIR" || rollback_failed=1
@@ -278,6 +287,22 @@ PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 PROJECT_INTERNAL_SUBNET="$(python3 "$SCRIPT_DIR/allocate_project_subnet.py" "$NEW_PROJECT" "$PROJECT_ROOT/projects")" \
   || die "Falha ao alocar subnet interna do projeto"
 JWT_SECRET_PROJETO=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n\r')
+AUTH_DB_USER="$(tenant_auth_role_name "$PROJECT_UUID")" \
+  || die "Falha ao derivar role Auth do clone"
+POSTGREST_DB_USER="$(tenant_rest_role_name "$PROJECT_UUID")" \
+  || die "Falha ao derivar role PostgREST do clone"
+AUTH_DB_PASSWORD="$(generate_tenant_service_password)" \
+  || die "Falha ao gerar senha da role Auth do clone"
+POSTGREST_DB_PASSWORD="$(generate_tenant_service_password)" \
+  || die "Falha ao gerar senha da role PostgREST do clone"
+[[ "$AUTH_DB_PASSWORD" != "$POSTGREST_DB_PASSWORD" ]] \
+  || die "Senhas das roles Auth e PostgREST do clone nao podem ser identicas"
+ORIGINAL_AUTH_DB_PASSWORD="$(sed -n 's/^AUTH_DB_PASSWORD=//p' "$ORIGINAL_DIR/.env" | tail -n1)"
+ORIGINAL_POSTGREST_DB_PASSWORD="$(sed -n 's/^POSTGREST_DB_PASSWORD=//p' "$ORIGINAL_DIR/.env" | tail -n1)"
+[[ -z "$ORIGINAL_AUTH_DB_PASSWORD" || "$AUTH_DB_PASSWORD" != "$ORIGINAL_AUTH_DB_PASSWORD" ]] \
+  || die "Clone nao pode reutilizar AUTH_DB_PASSWORD da origem"
+[[ -z "$ORIGINAL_POSTGREST_DB_PASSWORD" || "$POSTGREST_DB_PASSWORD" != "$ORIGINAL_POSTGREST_DB_PASSWORD" ]] \
+  || die "Clone nao pode reutilizar POSTGREST_DB_PASSWORD da origem"
 now_epoch=$(date +%s)
 exp=$((now_epoch + (3 * 30 * 24 * 3600)))
 ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
@@ -310,6 +335,10 @@ template_to_file() {
     -e "s|{{s3_protocol_credential_id}}|$(escape_sed_replacement "$S3_PROTOCOL_CREDENTIAL_ID")|g" \
     -e "s|{{s3_protocol_access_key_id}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_ID")|g" \
     -e "s|{{s3_protocol_access_key_secret}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_SECRET")|g" \
+    -e "s|{{auth_db_user}}|$(escape_sed_replacement "$AUTH_DB_USER")|g" \
+    -e "s|{{auth_db_password}}|$(escape_sed_replacement "$AUTH_DB_PASSWORD")|g" \
+    -e "s|{{postgrest_db_user}}|$(escape_sed_replacement "$POSTGREST_DB_USER")|g" \
+    -e "s|{{postgrest_db_password}}|$(escape_sed_replacement "$POSTGREST_DB_PASSWORD")|g" \
     "$template" > "$output"
 }
 
@@ -326,7 +355,10 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c
 CREATED_DB=1
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
-  "REVOKE CONNECT, TEMPORARY ON DATABASE $NEW_DB FROM PUBLIC; GRANT CONNECT, TEMPORARY ON DATABASE $NEW_DB TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $NEW_DB TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $NEW_DB TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $NEW_DB TO supabase_auth_admin;"
+  "REVOKE CONNECT, TEMPORARY, CREATE ON DATABASE $NEW_DB FROM PUBLIC, authenticator, supabase_auth_admin; GRANT CONNECT, TEMPORARY ON DATABASE $NEW_DB TO pgbouncer; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $NEW_DB TO supabase_storage_admin;"
+CREATED_SERVICE_ROLES=1
+provision_tenant_service_roles "$NEW_DB" "$PROJECT_UUID" "$AUTH_DB_PASSWORD" "$POSTGREST_DB_PASSWORD" \
+  || die "Falha ao provisionar roles de servico isoladas do clone"
 provision_platform_reader_role
 
 if [[ "$COPY_MODE" == "with-data" ]]; then
@@ -391,6 +423,8 @@ CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
 UPDATE auth.schema_migrations SET dirty = false WHERE dirty = true;
 UPDATE storage.migrations SET dirty = false WHERE dirty = true;
 SQL
+reassign_tenant_auth_objects_to_auth_admin "$NEW_DB" \
+  || die "Falha ao normalizar ownership de objetos Auth do clone"
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "ALTER DATABASE \"$NEW_DB\" SET search_path TO public, auth, storage, extensions;"
 
@@ -532,6 +566,8 @@ echo "HOST_AGENT_PROGRESS=duplicate:configure_wrappers"
 vector_sync_project_wrappers "$NEW_PROJECT" || die "Falha ao recriar wrappers vetoriais do clone"
 echo "HOST_AGENT_PROGRESS=duplicate:configure_identity"
 grant_platform_reader_on_tenant "$NEW_DB"
+reassign_tenant_auth_objects_to_auth_admin "$NEW_DB" \
+  || die "Falha ao normalizar ownership de objetos Auth do clone"
 provision_tenant_meta_role "$NEW_DB" "$PROJECT_UUID" \
   || die "Falha ao provisionar identidade SQL isolada do clone"
 

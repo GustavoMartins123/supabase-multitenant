@@ -113,9 +113,14 @@ class TenantContainersDoNotReceiveTheGlobalEnvTest(unittest.TestCase):
             )
 
     def test_no_control_plane_secret_is_declared_for_a_tenant_service(self) -> None:
-        for service in ("auth", "rest"):
+        self.assertNotIn(
+            "POSTGRES_PASSWORD",
+            self.template,
+            "POSTGRES_PASSWORD global nunca pode ser interpolada no dockercomposetemplate de projetos",
+        )
+        for service in ("nginx", "auth", "rest"):
             block = service_block(self.template, service)
-            for secret in CONTROL_PLANE_SECRETS:
+            for secret in (*CONTROL_PLANE_SECRETS, "POSTGRES_PASSWORD"):
                 self.assertNotIn(secret, block, f"{secret} exposto em {service}")
 
 

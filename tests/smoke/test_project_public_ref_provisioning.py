@@ -65,7 +65,9 @@ class PublicRefRenderingTest(unittest.TestCase):
         self.assertIn(f"supabase-auth-{NAME}:9999", nginx)
         self.assertIn(f'X-Project-Ref "{NAME}"', nginx)
         self.assertIn(f"container_name: supabase-nginx-{NAME}", compose)
-        self.assertIn(f"${{AUTH_DB_USER}}.{NAME}", compose)
+        self.assertIn(f"${{AUTH_DB_USER}}.{NAME}:${{AUTH_DB_PASSWORD:?", compose)
+        self.assertIn(f"${{POSTGREST_DB_USER}}.{NAME}:${{POSTGREST_DB_PASSWORD:?", compose)
+        self.assertNotIn("POSTGRES_PASSWORD", compose)
 
     def test_recreate_refuses_missing_or_invalid_public_reference(self) -> None:
         for bad in ("", "short", NAME, REF.upper(), "a" * 19 + "á"):
@@ -106,6 +108,11 @@ class PublicRefRenderingTest(unittest.TestCase):
             self.assertEqual(values["API_EXTERNAL_URL"], f"https://api.example.test/{REF}/auth/v1")
             self.assertEqual(values["SITE_URL"], f"https://api.example.test/{REF}/verify-success.html")
             self.assertEqual(values["DISABLE_SIGNUP"], "true")
+            self.assertEqual(values["AUTH_DB_USER"], f"tenant_auth_{TENANT.replace('-', '')}")
+            self.assertEqual(values["POSTGREST_DB_USER"], f"tenant_rest_{TENANT.replace('-', '')}")
+            self.assertRegex(values["AUTH_DB_PASSWORD"], r"^[A-Za-z0-9_-]{32,128}$")
+            self.assertRegex(values["POSTGREST_DB_PASSWORD"], r"^[A-Za-z0-9_-]{32,128}$")
+            self.assertNotEqual(values["AUTH_DB_PASSWORD"], values["POSTGREST_DB_PASSWORD"])
 
     def test_env_render_preserves_custom_application_redirects(self) -> None:
         replacements = templates._build_replacements(self.root, self.project, NAME)

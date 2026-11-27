@@ -11,6 +11,7 @@ REPORTS_ROOT="$SERVER_ROOT/storage-migration-reports"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/project_public_ref.sh"
+source "$SCRIPT_DIR/lib/tenant_service_roles.sh"
 
 for command in docker jq openssl python3 tar gzip sed grep systemctl; do
   command -v "$command" >/dev/null 2>&1 || die "$command nao esta instalado"
@@ -499,6 +500,10 @@ rollback_partial_project() {
   storage_delete_tenant "$tenant_id" || return 1
   migration_rekey_vector_physical_tables "_supabase_$project" "$tenant_id" stub || return 1
   restore_project_config "$project" || return 1
+  if ! grep -Eq '^AUTH_DB_PASSWORD=[^[:space:]]+' "$project_dir/.env" 2>/dev/null \
+     || ! grep -Eq '^POSTGREST_DB_PASSWORD=[^[:space:]]+' "$project_dir/.env" 2>/dev/null; then
+    rollback_tenant_service_roles_to_legacy_db_access "_supabase_$project" "$tenant_id" || return 1
+  fi
   restore_old_storage_if_needed "$project" || return 1
   (cd "$project_dir" && docker compose -p "$project" \
     --env-file ../../.env --env-file .env up -d) >/dev/null || return 1
@@ -513,6 +518,8 @@ migrate_project() (
   local old_storage="$project_dir/storage" old_namespace="$project_dir/storage/stub/stub"
   local credential_row credential_id access_key secret_key current_state=""
   local storage_owned=0 vector_rekeyed=0 config_changed=0
+  local service_roles_provisioned=0 had_legacy_service_roles=0
+  local migrated_auth_pwd="" migrated_rest_pwd=""
 
   [[ -f "$env_file" && -f "$compose_file" ]] \
     || { report project "$project" failed "configuracao ausente"; return 1; }
@@ -553,6 +560,11 @@ migrate_project() (
   PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_PUBLIC_REF"
   PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
   export PROJECT_UUID SERVICE_ROLE_KEY_PROJETO
+  if [[ -z "${AUTH_DB_PASSWORD:-}" || -z "${POSTGREST_DB_PASSWORD:-}" \
+      || "${AUTH_DB_USER:-}" == "supabase_auth_admin" \
+      || "${POSTGREST_DB_USER:-}" == "authenticator" ]]; then
+    had_legacy_service_roles=1
+  fi
 
   storage_assert_project_identity "$project" "$PROJECT_UUID" \
     || { report project "$project" failed "tenant UUID diverge do control plane"; return 1; }
@@ -617,6 +629,10 @@ migrate_project() (
     if [[ "$config_changed" -eq 1 ]]; then
       restore_project_config "$project" >/dev/null 2>&1 || rollback_failed=1
     fi
+    if [[ "$service_roles_provisioned" -eq 1 && "$had_legacy_service_roles" -eq 1 ]]; then
+      rollback_tenant_service_roles_to_legacy_db_access "_supabase_$project" "$PROJECT_UUID" \
+        >/dev/null 2>&1 || rollback_failed=1
+    fi
     restore_old_storage_if_needed "$project" >/dev/null 2>&1 || rollback_failed=1
     if [[ "$rollback_failed" -eq 0 ]]; then
       (cd "$project_dir" && docker compose -p "$project" \
@@ -680,6 +696,13 @@ migrate_project() (
   render_project_env "$project" "$env_file" "$env_file" \
     "$credential_id" "$access_key" "$secret_key"
   config_changed=1
+  migrated_auth_pwd="$(canonical_env_value "$env_file" AUTH_DB_PASSWORD)" \
+    || die "AUTH_DB_PASSWORD ausente apos renderizacao do .env de $project"
+  migrated_rest_pwd="$(canonical_env_value "$env_file" POSTGREST_DB_PASSWORD)" \
+    || die "POSTGREST_DB_PASSWORD ausente apos renderizacao do .env de $project"
+  service_roles_provisioned=1
+  provision_tenant_service_roles "_supabase_$project" "$PROJECT_UUID" \
+    "$migrated_auth_pwd" "$migrated_rest_pwd"
   render_project_files "$project"
   printf 'CONFIG_RENDERED\n' > "$state_file"
 

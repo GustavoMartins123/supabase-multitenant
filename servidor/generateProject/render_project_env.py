@@ -7,8 +7,10 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import sys
 import tempfile
+import uuid
 
 from allocate_project_subnet import allocate_project_internal_subnet
 from project_env_urls import render_project_url_values
@@ -51,6 +53,10 @@ PROTECTED_KEYS = {
     "API_EXTERNAL_URL",
     "POSTGRES_DATABASE",
     "PROJECT_ROOT",
+    "AUTH_DB_USER",
+    "AUTH_DB_PASSWORD",
+    "POSTGREST_DB_USER",
+    "POSTGREST_DB_PASSWORD",
     "ANON_KEY_PROJETO",
     "SERVICE_ROLE_KEY_PROJETO",
     "JWT_SECRET_PROJETO",
@@ -63,6 +69,7 @@ PROTECTED_KEYS = {
 ASSIGNMENT_RE = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
 COMMENTED_ASSIGNMENT_RE = re.compile(r"^#\s*([A-Z][A-Z0-9_]*)=(.*)$")
 PLACEHOLDER_RE = re.compile(r"\{\{[a-z0-9_]+\}\}")
+SERVICE_DB_PASSWORD_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 
 
 def read_assignments(path: pathlib.Path) -> tuple[dict[str, str], list[str]]:
@@ -105,6 +112,41 @@ def main() -> int:
                 project_id, projects_dir, inspect_docker=False
             )
     project_url_values = render_project_url_values(current_values, replacements)
+    raw_uuid = (
+        replacements.get("project_uuid") or current_values.get("PROJECT_UUID") or ""
+    ).strip().lower()
+    uuid_hex = ""
+    if raw_uuid:
+        try:
+            uuid_hex = uuid.UUID(raw_uuid).hex
+        except ValueError:
+            uuid_hex = ""
+    if not replacements.get("auth_db_user"):
+        if not uuid_hex:
+            raise SystemExit("PROJECT_UUID invalido para derivar AUTH_DB_USER")
+        replacements["auth_db_user"] = f"tenant_auth_{uuid_hex}"
+    if not replacements.get("postgrest_db_user"):
+        if not uuid_hex:
+            raise SystemExit("PROJECT_UUID invalido para derivar POSTGREST_DB_USER")
+        replacements["postgrest_db_user"] = f"tenant_rest_{uuid_hex}"
+    if not replacements.get("auth_db_password"):
+        existing_auth_pwd = current_values.get("AUTH_DB_PASSWORD", "").strip()
+        if SERVICE_DB_PASSWORD_RE.fullmatch(existing_auth_pwd):
+            replacements["auth_db_password"] = existing_auth_pwd
+        else:
+            replacements["auth_db_password"] = secrets.token_urlsafe(32)
+    if not replacements.get("postgrest_db_password"):
+        existing_rest_pwd = current_values.get("POSTGREST_DB_PASSWORD", "").strip()
+        if (
+            SERVICE_DB_PASSWORD_RE.fullmatch(existing_rest_pwd)
+            and existing_rest_pwd != replacements["auth_db_password"]
+        ):
+            replacements["postgrest_db_password"] = existing_rest_pwd
+        else:
+            candidate = secrets.token_urlsafe(32)
+            while candidate == replacements["auth_db_password"]:
+                candidate = secrets.token_urlsafe(32)
+            replacements["postgrest_db_password"] = candidate
     obsolete = sorted(
         OBSOLETE_STORAGE_KEYS.intersection(current_values)
         | {
