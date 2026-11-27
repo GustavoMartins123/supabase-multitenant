@@ -8,6 +8,8 @@ DECLARE
     tenant_role TEXT := current_setting('platform.meta_role');
     pinned_endpoint TEXT := current_setting('platform.vector_fdw_endpoint_url');
     pinned_region TEXT := current_setting('platform.vector_fdw_aws_region');
+    tenant_hex TEXT;
+    expected_endpoint TEXT;
     previous_tenant TEXT;
     handler_oid OID;
     obj RECORD;
@@ -15,8 +17,18 @@ BEGIN
     IF tenant_role !~ '^tenant_meta_[0-9a-f]{32}$' THEN
         RAISE EXCEPTION 'Invalid tenant FDW identity';
     END IF;
-    IF pinned_endpoint !~ '^http://supabase-nginx-[a-z_][a-z0-9_]{2,39}:8081/vector$' THEN
+    IF pinned_endpoint !~ '^http://storage-vector-proxy:8081/fdw/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/vector$' THEN
         RAISE EXCEPTION 'Invalid S3 Vectors FDW pinned endpoint URL';
+    END IF;
+    tenant_hex := substr(tenant_role, length('tenant_meta_') + 1);
+    expected_endpoint := 'http://storage-vector-proxy:8081/fdw/'
+        || substr(tenant_hex, 1, 8) || '-'
+        || substr(tenant_hex, 9, 4) || '-'
+        || substr(tenant_hex, 13, 4) || '-'
+        || substr(tenant_hex, 17, 4) || '-'
+        || substr(tenant_hex, 21, 12) || '/vector';
+    IF pinned_endpoint <> expected_endpoint THEN
+        RAISE EXCEPTION 'S3 Vectors FDW pinned endpoint URL does not match tenant identity';
     END IF;
     IF pinned_region !~ '^[a-z0-9][a-z0-9-]{0,62}$' THEN
         RAISE EXCEPTION 'Invalid S3 Vectors FDW pinned AWS region';

@@ -95,8 +95,10 @@ class MailerRuntimeTests(unittest.TestCase):
             nginx,
         )
         self.assertIn("location = /assets/logo.png", nginx)
-        self.assertIn("location = /redefinir-senha.html", nginx.split("listen 8081;")[0])
-        self.assertNotIn("location = /redefinir-senha.html", nginx.split("listen 8081;")[1])
+        self.assertNotIn("listen 8081;", nginx)
+        self.assertEqual(nginx.count("location = /redefinir-senha.html"), 1)
+        self.assertIn("location = /redefinir-senha.html", nginx.split("\nstream {\n", 1)[0])
+        self.assertNotIn("location = /redefinir-senha.html", nginx.split("\nstream {\n", 1)[1])
         self.assertNotIn("location = /magiclink.html", nginx)
         for name in (".dockerignore", "Dockerfile.dockerignore"):
             self.assertIn("!nginx/public/**", (self.project / name).read_text())

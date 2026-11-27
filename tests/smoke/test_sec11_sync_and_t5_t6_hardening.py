@@ -69,7 +69,6 @@ class Sec11TopologyAndHardeningTests(unittest.TestCase):
         for source, name in (
             (main_compose, "realtime"),
             (main_compose, "supavisor"),
-            (main_compose, "db"),
             (api_compose, "key-authorizer"),
             (api_compose, "template-service"),
             (traefik_compose, "traefik"),
@@ -78,17 +77,29 @@ class Sec11TopologyAndHardeningTests(unittest.TestCase):
             self.assertIn("project-gateways", block, name)
             self.assertIn("rede-supabase", block, name)
 
-        # db joins project-gateways solely for outbound S3 Vectors FDW :8081/vector and must
-        # explicitly reject inbound PostgreSQL traffic from PROJECT_GATEWAYS_SUBNET.
+        # db stays completely off project-gateways; outbound S3 Vectors FDW traffic
+        # goes through storage-vector-proxy on storage-control instead.
         db_block = _service_block(main_compose, "db")
-        self.assertIn("PG_HBA_DENY_CIDRS: ${PROJECT_GATEWAYS_SUBNET:-172.54.0.0/23}", db_block)
+        self.assertNotIn("project-gateways", db_block)
+        self.assertNotIn("PG_HBA_DENY_CIDRS", db_block)
+        self.assertIn("storage-control", db_block)
+
+        vector_proxy_block = _service_block(main_compose, "storage-vector-proxy")
+        self.assertIn("container_name: supabase-storage-vector-proxy", vector_proxy_block)
+        self.assertIn("storage-control", vector_proxy_block)
+        self.assertNotIn("project-gateways", vector_proxy_block)
+        self.assertNotIn("rede-supabase", vector_proxy_block)
+        self.assertNotIn("storage-gateways", vector_proxy_block)
+        self.assertNotIn("storage-data-plane", vector_proxy_block)
 
         # Sensitive control-plane and data-plane internals stay off project-gateways.
         for source, name in (
+            (main_compose, "db"),
             (main_compose, "functions"),
             (main_compose, "storage"),
             (main_compose, "imgproxy"),
             (main_compose, "storage-data-plane"),
+            (main_compose, "storage-vector-proxy"),
             (main_compose, "analytics"),
             (main_compose, "vector"),
             (api_compose, "projects-api"),

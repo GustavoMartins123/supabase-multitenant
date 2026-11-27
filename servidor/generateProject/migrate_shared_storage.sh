@@ -307,7 +307,7 @@ SQL
 
 start_global_storage() {
   (cd "$SERVER_ROOT" && docker compose -f docker-compose.yml --env-file .env \
-    up -d db supavisor imgproxy storage storage-data-plane)
+    up -d db supavisor imgproxy storage storage-data-plane storage-vector-proxy)
   storage_wait_global || die "Storage compartilhado nao iniciou"
 }
 

@@ -101,7 +101,7 @@ def main() -> None:
     run('python', str(root / 'tools/configure_api_resource_profiles.py'), '--source', str(env_file),
         '--output', str(server / '.resource-profiles.env'))
     run('python', str(server / 'generateProject/functions_config.py'), '--root', str(server), 'init')
-    services = ('db', 'realtime', 'supavisor', 'functions', 'storage', 'imgproxy', 'storage-data-plane')
+    services = ('db', 'realtime', 'supavisor', 'functions', 'storage', 'imgproxy', 'storage-data-plane', 'storage-vector-proxy')
     model = yaml.safe_load((server / 'docker-compose.yml').read_text())
     model['services'] = {name: model['services'][name] for name in services}
     for name, service in model['services'].items():
@@ -447,22 +447,13 @@ process.stdout.write(JSON.stringify({status:response.status,body}));
         assert response['vectors'][0]['key'] == 'original'
         assert response['vectors'][0]['data']['float32'] == [1, 0, 0]
 
-    def project_gateway_ip(ref: str) -> str:
-        # The test executor shares both supabase-project-gateways and
-        # supabase-functions-gateways with project gateways, so dial the
-        # project-gateways IP directly to match the DB FDW network path.
-        ip = run('docker', 'inspect', '--format',
-                 '{{(index .NetworkSettings.Networks "supabase-project-gateways").IPAddress}}',
-                 'supabase-nginx-' + ref)
-        assert ip, f'missing supabase-project-gateways IP for supabase-nginx-{ref}'
-        return ip
-
     def check_signed_gateway(ref: str, credential_ref: str, expected: int,
                              *, tamper: bool = False) -> None:
+        target_env = environment(server / 'projects' / ref / '.env')
+        target_uuid = target_env['PROJECT_UUID'].lower()
         env = environment(server / 'projects' / credential_ref / '.env')
-        host = 'supabase-nginx-' + ref + ':8081'
-        gateway_ip = project_gateway_ip(ref)
-        path, body = '/vector/ListVectorBuckets', b'{}'
+        host = 'storage-vector-proxy:8081'
+        path, body = f'/fdw/{target_uuid}/vector/ListVectorBuckets', b'{}'
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         day = stamp[:8]
         scope = day + '/' + os.environ['STORAGE_S3_REGION'] + '/s3vectors/aws4_request'
@@ -477,11 +468,11 @@ process.stdout.write(JSON.stringify({status:response.status,body}));
         signature = hmac.new(key, to_sign.encode(), 'sha256').hexdigest()
         if tamper:
             signature = ('0' if signature[0] != '0' else '1') + signature[1:]
-        request = urllib.request.Request(f'http://{gateway_ip}:8081{path}', data=body, headers={
+        request = urllib.request.Request(f'http://{host}{path}', data=body, headers={
             'Content-Type': 'application/json', 'Host': host, 'X-Amz-Date': stamp,
             'X-Amz-Content-Sha256': digest,
-            # A source credential must not select its tenant through a clone gateway.
-            'X-Forwarded-Host': env['PROJECT_UUID'] + '.storage.internal',
+            # A source credential must not select its tenant through another tenant's FDW path.
+            'X-Forwarded-Host': env['PROJECT_UUID'].lower() + '.storage.internal',
             'Authorization': f'AWS4-HMAC-SHA256 Credential={env["S3_PROTOCOL_ACCESS_KEY_ID"]}/{scope}, SignedHeaders={signed}, Signature={signature}',
         })
         try:
@@ -509,12 +500,19 @@ process.stdout.write(body);});'''
 
     def check_internal_auth_boundary(ref: str) -> None:
         env = environment(server / 'projects' / ref / '.env')
-        host = 'supabase-nginx-' + ref + ':8081'
-        endpoint = f'http://{project_gateway_ip(ref)}:8081/vector/ListVectorBuckets'
-        for method, authorization, expected in [('POST', None, 403),
-                                                 ('POST', 'Bearer ' + env['SERVICE_ROLE_KEY_PROJETO'], 403),
-                                                 ('GET', None, 405)]:
-            request = urllib.request.Request(endpoint,
+        target_uuid = env['PROJECT_UUID'].lower()
+        host = 'storage-vector-proxy:8081'
+        endpoint = f'http://{host}/fdw/{target_uuid}/vector/ListVectorBuckets'
+        with urllib.request.urlopen(f'http://{host}/healthz', timeout=15) as response:
+            assert response.status == 200
+        for method, url, authorization, expected in [
+            ('POST', endpoint, None, 403),
+            ('POST', endpoint, 'Bearer ' + env['SERVICE_ROLE_KEY_PROJETO'], 403),
+            ('GET', endpoint, None, 405),
+            ('POST', f'http://{host}/vector/ListVectorBuckets', None, 403),
+            ('POST', f'http://{host}/fdw/not-a-uuid/vector/ListVectorBuckets', None, 403),
+        ]:
+            request = urllib.request.Request(url,
                                              data=b'{}' if method == 'POST' else None, method=method,
                                              headers={'Host': host})
             if authorization:
@@ -524,16 +522,27 @@ process.stdout.write(body);});'''
                     status = response.status
             except urllib.error.HTTPError as error:
                 status = error.code
-            assert status == expected, (method, status)
+            assert status == expected, (method, url, status)
 
     def check_object(ref: str) -> None:
         assert object_request(ref, 'GET', '/object/p1-files/original.txt', '', 'text/plain') == 'original object'
 
-    # Executor must join the server, project-gateways and functions-gateways networks, but no HTTP service gets its socket.
+    # Executor must join the server, project-gateways, functions-gateways and storage-control networks,
+    # while supabase-db remains completely off supabase-project-gateways.
     executor = 'p1-lifecycle-executor-' + suffix
     run('docker', 'network', 'connect', 'rede-supabase', executor)
     run('docker', 'network', 'connect', 'supabase-project-gateways', executor)
     run('docker', 'network', 'connect', 'supabase-functions-gateways', executor)
+    run('docker', 'network', 'connect', 'supabase-storage-control', executor)
+    db_networks = set(run('docker', 'inspect', '--format',
+                          '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}',
+                          'supabase-db').splitlines())
+    assert 'supabase-project-gateways' not in db_networks, db_networks
+    assert 'supabase-storage-control' in db_networks, db_networks
+    proxy_networks = set(run('docker', 'inspect', '--format',
+                             '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}',
+                             'supabase-storage-vector-proxy').splitlines())
+    assert proxy_networks == {'supabase-storage-control'}, proxy_networks
     seed(project, first_uuid)
     lifecycle('generate_project.sh', project, first_uuid, 'false')
     initial = check_projection(project, first_uuid)
@@ -587,18 +596,28 @@ process.stdout.write(body);});'''
     sql("CREATE SCHEMA vector_client_clone; IMPORT FOREIGN SCHEMA \"p1-vectors\" FROM SERVER p1_vectors_fdw_server INTO vector_client_clone OPTIONS(strict 'true');", clone_db)
     assert sql('SELECT count(*) FROM vector_client_clone.p1_index;', clone_db) == '1'
     assert sql("SELECT count(*) FROM pg_foreign_table;", clone_db) == '1'
-    assert sql("SELECT bool_and(srvoptions::text LIKE '%:8081/vector%') FROM pg_foreign_server;", clone_db) == 't'
+    assert sql(f"SELECT bool_and(srvoptions::text LIKE '%http://storage-vector-proxy:8081/fdw/{second_uuid}/vector%') FROM pg_foreign_server;", clone_db) == 't'
     vector_request(copied, 'PutVectors', {**vector_identity, 'vectors': [{'key': 'clone-only', 'data': {'float32': [0, 1, 0]}}]})
     assert sql('SELECT count(*) FROM vector_client_clone.p1_index;', clone_db) == '2'
     assert sql('SELECT count(*) FROM vector_client.p1_index;', '_supabase_' + project) == '1'
-    run('docker', 'stop', 'supabase-nginx-' + copied)
+    run('docker', 'stop', 'supabase-storage-vector-proxy')
     try:
         failed_probe = subprocess.run(['bash', str(server / 'generateProject/operations/setup_vector_bucket_wrapper.sh'),
                                        copied, 'p1-vectors'], capture_output=True, text=True, cwd=server)
         assert failed_probe.returncode != 0
         assert sql("SELECT count(*) FROM pg_namespace WHERE nspname LIKE 'vector_wrapper_probe_%';", clone_db) == '0'
     finally:
-        run('docker', 'start', 'supabase-nginx-' + copied)
+        run('docker', 'start', 'supabase-storage-vector-proxy')
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                with urllib.request.urlopen('http://storage-vector-proxy:8081/healthz', timeout=2) as response:
+                    if response.status == 200:
+                        break
+            except Exception:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.2)
     assert sql('SELECT count(*) FROM vector_client_clone.p1_index;', clone_db) == '2'
     print('Real SigV4 gateway: valid signature accepted; forged signature and cross-tenant credential denied', flush=True)
     assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + copied) == 'original'

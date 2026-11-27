@@ -35,10 +35,6 @@ services:
       functions-db:
         aliases:
           - supabase-db
-      # Attached solely for outbound Storage Vectors FDW HTTP calls to
-      # http://supabase-nginx-<project>:8081/vector; inbound PostgreSQL
-      # connections from PROJECT_GATEWAYS_SUBNET are rejected in pg_hba.conf.
-      project-gateways:
     volumes:
       - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
       # Must be superuser to create event trigger
@@ -93,7 +89,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXP: ${JWT_EXPIRY}
-      PG_HBA_DENY_CIDRS: ${PROJECT_GATEWAYS_SUBNET:-172.54.0.0/23}
     shm_size: ${POSTGRES_SHM_SIZE}
     command:
       - postgres
@@ -456,6 +451,37 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  storage-vector-proxy:
+    container_name: supabase-storage-vector-proxy
+    image: ${STORAGE_DATA_PLANE_PROXY_IMAGE:-nginx/nginx-unprivileged:1.31.10-alpine3.24-slim}
+    restart: unless-stopped
+    logging: *vector-logging
+    entrypoint: ["nginx"]
+    command: ["-g", "daemon off;", "-c", "/etc/nginx/nginx.conf"]
+    networks:
+      - storage-control
+    volumes:
+      - ./volumes/storage-vector-proxy/nginx.conf:/etc/nginx/nginx.conf:ro,z
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8081/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 64m
+    memswap_limit: 128m
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m
     cap_drop:
       - ALL
     security_opt:

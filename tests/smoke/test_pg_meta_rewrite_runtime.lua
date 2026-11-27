@@ -141,7 +141,9 @@ _G.ngx = {
 }
 
 local pg_meta = require("proxy_rewrites.pg_meta")
-local context = { ref = REF, technical_name = "alpha_proj" }
+local PROJECT_UUID = "11111111-1111-4111-8111-111111111111"
+local TENANT_UUID = "22222222-2222-4222-8222-222222222222"
+local context = { ref = REF, technical_name = "alpha_proj", project_uuid = PROJECT_UUID, tenant_uuid = TENANT_UUID }
 
 local function reset(args, args_err, body, method)
     request_state.method = method or "GET"
@@ -218,7 +220,7 @@ if not expected_region or expected_region:match("^%s*$") then
 else
     expected_region = expected_region:match("^%s*(.-)%s*$"):lower()
 end
-local expected_endpoint = "http://supabase-nginx-alpha_proj:8081/vector"
+local expected_endpoint = "http://storage-vector-proxy:8081/fdw/" .. TENANT_UUID .. "/vector"
 
 -- 4. Static OPTIONS (endpoint_url '...' and optional aws_region '...')
 local static_sql = "CREATE FOREIGN DATA WRAPPER my_fdw HANDLER s3_vectors_fdw_handler "
@@ -232,6 +234,7 @@ local static_ok, static_err = pg_meta.rewrite(context)
 assert(static_ok == true and static_err == nil, "static wrapper rewrite failed: " .. tostring(static_err))
 local static_decoded = assert(json_codec.decode(request_state.body_set))
 assert(static_decoded.query:find("endpoint_url '" .. expected_endpoint .. "'", 1, true), static_decoded.query)
+assert(not static_decoded.query:find(PROJECT_UUID, 1, true), static_decoded.query)
 assert(static_decoded.query:find("aws_region '" .. expected_region .. "'", 1, true), static_decoded.query)
 assert(not static_decoded.query:find("evil.example", 1, true))
 assert(not static_decoded.query:find("'local'", 1, true))
@@ -262,6 +265,7 @@ local v20_ok, v20_err = pg_meta.rewrite(context)
 assert(v20_ok == true and v20_err == nil, "Studio v20 DO execute format rewrite failed: " .. tostring(v20_err))
 local v20_decoded = assert(json_codec.decode(request_state.body_set))
 assert(v20_decoded.query:find("'" .. expected_endpoint .. "'", 1, true), v20_decoded.query)
+assert(not v20_decoded.query:find(PROJECT_UUID, 1, true), v20_decoded.query)
 assert(v20_decoded.query:find("'" .. expected_region .. "'", 1, true), v20_decoded.query)
 assert(v20_decoded.query:find("'my_vectors'", 1, true), v20_decoded.query)
 assert(v20_decoded.query:find("v_vault_access_key_id,v_vault_secret_access_key", 1, true), v20_decoded.query)
@@ -288,6 +292,7 @@ local v19_ok, v19_err = pg_meta.rewrite(context)
 assert(v19_ok == true and v19_err == nil, "Studio v19 DO execute format rewrite failed: " .. tostring(v19_err))
 local v19_decoded = assert(json_codec.decode(request_state.body_set))
 assert(v19_decoded.query:find("'" .. expected_endpoint .. "'", 1, true), v19_decoded.query)
+assert(not v19_decoded.query:find(PROJECT_UUID, 1, true), v19_decoded.query)
 assert(v19_decoded.query:find("'" .. expected_region .. "'", 1, true), v19_decoded.query)
 assert(not v19_decoded.query:find("untrusted.example", 1, true))
 
@@ -311,6 +316,25 @@ for _, bad_sql in ipairs(invalid_wrapper_queries) do
     ngx.var.request_uri = "/api/platform/pg-meta/" .. REF .. "/query"
     local bad_ok, bad_err = pg_meta.rewrite(context)
     assert(bad_ok == nil and type(bad_err) == "string", "expected rejection for: " .. bad_sql)
+end
+
+-- 8. Rejects missing, non-canonical, or uppercase tenant_uuid even when project_uuid is valid (no fallback)
+do
+    reset({}, nil, json_codec.encode({ query = static_sql }), "POST")
+    ngx.var.resource = "/query"
+    ngx.var.request_uri = "/api/platform/pg-meta/" .. REF .. "/query"
+    local nil_ok, nil_err = pg_meta.rewrite({ ref = REF, technical_name = "alpha_proj", project_uuid = PROJECT_UUID, tenant_uuid = nil })
+    assert(nil_ok == nil and nil_err == "Canonical tenant UUID is required for the S3 Vectors Wrapper",
+        "expected nil tenant_uuid rejection, got: " .. tostring(nil_err))
+end
+for _, bad_uuid in ipairs({ "", "not-a-uuid", "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", TENANT_UUID:gsub("%-", ""), "../evil" }) do
+    reset({}, nil, json_codec.encode({ query = static_sql }), "POST")
+    ngx.var.resource = "/query"
+    ngx.var.request_uri = "/api/platform/pg-meta/" .. REF .. "/query"
+    local bad_ctx = { ref = REF, technical_name = "alpha_proj", project_uuid = PROJECT_UUID, tenant_uuid = bad_uuid }
+    local bad_ok, bad_err = pg_meta.rewrite(bad_ctx)
+    assert(bad_ok == nil and bad_err == "Canonical tenant UUID is required for the S3 Vectors Wrapper",
+        "expected invalid tenant_uuid rejection for: " .. tostring(bad_uuid) .. ", got: " .. tostring(bad_err))
 end
 
 print("pg_meta rewrite runtime: ok")

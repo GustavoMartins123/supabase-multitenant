@@ -581,8 +581,17 @@ local function count_standalone_word(sql, word)
     return count
 end
 
--- O wrapper assina o Host do endpoint. Cada projeto usa seu proprio Nginx como
--- fronteira confiavel; ele fixa o tenant UUID e encaminha ao Storage global.
+local function is_canonical_uuid(value)
+    if type(value) ~= "string" or #value ~= 36 then
+        return false
+    end
+    return value:match(
+        "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
+    ) ~= nil and value == value:lower()
+end
+
+-- O wrapper assina o Host do endpoint. O proxy interno dedicado valida o
+-- SigV4, fixa o tenant UUID em X-Forwarded-Host e encaminha ao Storage global.
 -- O patch e limitado ao SQL de criacao do S3 Vectors Wrapper.
 local function patch_s3_vectors_wrapper_query(body, context)
     if type(body) ~= "table" or type(body.query) ~= "string" then
@@ -597,15 +606,12 @@ local function patch_s3_vectors_wrapper_query(body, context)
         return body
     end
 
-    local technical_name = context.technical_name
-    if type(technical_name) ~= "string"
-        or not technical_name:match("^[a-z_][a-z0-9_]*$")
-        or #technical_name < 3 or #technical_name > 40
-    then
-        return nil, "Canonical technical name is required for the S3 Vectors Wrapper"
+    local tenant_uuid = context.tenant_uuid
+    if not is_canonical_uuid(tenant_uuid) then
+        return nil, "Canonical tenant UUID is required for the S3 Vectors Wrapper"
     end
 
-    local endpoint = "http://supabase-nginx-" .. technical_name .. ":8081/vector"
+    local endpoint = "http://storage-vector-proxy:8081/fdw/" .. tenant_uuid .. "/vector"
     local region = storage_s3_region()
 
     local calls, scan_err = find_execute_format_calls(query)
