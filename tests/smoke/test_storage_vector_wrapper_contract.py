@@ -56,7 +56,7 @@ class StorageVectorWrapperContractTests(unittest.TestCase):
         self.assertIn("vault.create_secret", script)
         self.assertIn("vault.update_secret", script)
         self.assertIn(
-            'VECTOR_ENDPOINT="http://supabase-nginx-${PROJECT_ID}:8081/vector"',
+            'VECTOR_ENDPOINT="http://storage-vector-proxy:8081/fdw/${PROJECT_UUID}/vector"',
             script,
         )
         self.assertIn("vault_access_key_id", script)
@@ -81,24 +81,36 @@ class StorageVectorWrapperContractTests(unittest.TestCase):
         self.assertNotIn("nspowner", script)
 
     def test_internal_vector_listener_only_accepts_sigv4_and_has_no_public_port(self) -> None:
-        nginx = (ROOT / 'servidor/generateProject/nginxtemplate').read_text(encoding="utf-8")
-        internal = nginx.split('listen 8081;', 1)[1]
+        project_nginx = (ROOT / "servidor/generateProject/nginxtemplate").read_text(encoding="utf-8")
+        self.assertNotIn("listen 8081;", project_nginx)
+
+        proxy_nginx = (ROOT / "servidor/volumes/storage-vector-proxy/nginx.conf").read_text(encoding="utf-8")
+        self.assertIn("listen 8081;", proxy_nginx)
+        self.assertIn("location = /healthz", proxy_nginx)
+        self.assertIn(
+            'location ~ "^/fdw/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/vector/([A-Za-z]+)$"',
+            proxy_nginx,
+        )
         self.assertIn(
             r'"~^AWS4-HMAC-SHA256 Credential=[^/,\s]+/[0-9]{8}/[^/,\s]+/s3vectors/aws4_request,\s*SignedHeaders=[^,\s]+,\s*Signature=[0-9a-fA-F]{64}$" 1;',
-            nginx,
+            proxy_nginx,
         )
-        self.assertIn('"~^[0-9]{8}T[0-9]{6}Z$" 1;', nginx)
-        self.assertIn('map "$has_sigv4_header:$has_amz_date" $is_sigv4_auth', nginx)
-        self.assertIn('allow ${PROJECT_GATEWAYS_SUBNET};', internal)
-        self.assertIn('allow ${SUPABASE_NETWORK_SUBNET};', internal)
-        self.assertIn('deny all;', internal)
-        self.assertIn('if ($request_method != POST) { return 405; }', internal)
-        self.assertIn('if ($uri !~ "^/vector/[A-Za-z]+$") { return 404; }', internal)
-        self.assertIn('if ($is_sigv4_auth != 1) { return 403; }', internal)
-        self.assertIn('client_max_body_size 25m;', internal)
-        self.assertIn('proxy_set_header Forwarded "";', internal)
-        self.assertIn('proxy_set_header apikey "";', internal)
-        self.assertIn('proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";', internal)
+        self.assertIn('"~^[0-9]{8}T[0-9]{6}Z$" 1;', proxy_nginx)
+        self.assertIn('map "$vector_sigv4_header_valid:$vector_amz_date_valid" $vector_sigv4_valid', proxy_nginx)
+        self.assertIn("if ($request_method != POST)", proxy_nginx)
+        self.assertIn("return 405;", proxy_nginx)
+        self.assertIn("if ($vector_sigv4_valid = 0)", proxy_nginx)
+        self.assertIn("return 403;", proxy_nginx)
+        self.assertIn("client_max_body_size 25m;", proxy_nginx)
+        self.assertIn("rewrite ^ /vector/$fdw_vector_op break;", proxy_nginx)
+        self.assertIn('default "storage:5000";', proxy_nginx)
+        self.assertNotIn("5001", proxy_nginx)
+        self.assertIn("proxy_set_header Host $http_host;", proxy_nginx)
+        self.assertIn('proxy_set_header X-Forwarded-Host "$fdw_tenant_uuid.storage.internal";', proxy_nginx)
+        self.assertIn('proxy_set_header X-Forwarded-Prefix "/fdw/$fdw_tenant_uuid";', proxy_nginx)
+        self.assertNotIn('X-Forwarded-Prefix "/fdw/$fdw_tenant_uuid/vector"', proxy_nginx)
+        self.assertIn('proxy_set_header apikey "";', proxy_nginx)
+        self.assertIn('proxy_set_header Forwarded "";', proxy_nginx)
         self.assertNotIn('ports:', (ROOT / 'servidor/generateProject/dockercomposetemplate').read_text(encoding="utf-8"))
 
     def test_probe_is_transactional_and_uses_only_the_canonical_import_protocol(self) -> None:

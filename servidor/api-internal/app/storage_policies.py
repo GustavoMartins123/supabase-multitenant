@@ -212,7 +212,9 @@ _DO_SET_DELEGATED_ROLE_RE = re.compile(
     r'\bSET\s+(?:LOCAL\s+)?ROLE\s+"?(?:supabase_storage_admin|supabase_auth_admin)"?\b',
     re.IGNORECASE,
 )
-_PROJECT_ID_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
+_CANONICAL_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 _FDW_NAME_RE = re.compile(r"^[a-z0-9_]{1,63}$")
 _STORAGE_S3_REGION_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 _SAFE_UNQUOTED_IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
@@ -284,13 +286,20 @@ def vector_fdw_delegation_key(tenant_uuid, *, base_key: bytes | None = None) -> 
     return hmac.new(root, b"studio-vector-fdw-v1", hashlib.sha256).digest()
 
 
-def vector_fdw_endpoint_url(project_id: str | None) -> str:
-    if not isinstance(project_id, str):
-        raise StoragePolicyError("Identificador de projeto inválido para S3 Vectors FDW")
-    normalized = project_id.strip()
-    if not _PROJECT_ID_RE.fullmatch(normalized):
-        raise StoragePolicyError("Identificador de projeto inválido para S3 Vectors FDW")
-    return f"http://supabase-nginx-{normalized}:8081/vector"
+def _canonical_tenant_uuid(tenant_uuid: UUID | str | None) -> str:
+    if isinstance(tenant_uuid, UUID):
+        normalized = str(tenant_uuid)
+    elif isinstance(tenant_uuid, str):
+        normalized = tenant_uuid
+    else:
+        raise StoragePolicyError("UUID de tenant inválido para S3 Vectors FDW")
+    if not _CANONICAL_UUID_RE.fullmatch(normalized):
+        raise StoragePolicyError("UUID de tenant inválido para S3 Vectors FDW")
+    return normalized
+
+
+def vector_fdw_endpoint_url(tenant_uuid: UUID | str | None) -> str:
+    return f"http://storage-vector-proxy:8081/fdw/{_canonical_tenant_uuid(tenant_uuid)}/vector"
 
 
 def resolve_storage_s3_region(*, root_env_path: Path | None = None) -> str:
@@ -886,7 +895,11 @@ def _rewrite_create_server(tree: dict) -> tuple[object, bool] | None:
     if tree.get("@") != "CreateForeignServerStmt":
         return None
     # Validate AST shape eagerly before deferring endpoint/region pinning to rewrite time.
-    _build_create_server_sql(tree, "http://supabase-nginx-placeholder:8081/vector", "us-east-1")
+    _build_create_server_sql(
+        tree,
+        "http://storage-vector-proxy:8081/fdw/00000000-0000-0000-0000-000000000000/vector",
+        "us-east-1",
+    )
 
     def _build(endpoint_url: str, aws_region: str) -> str:
         return _build_create_server_sql(tree, endpoint_url, aws_region)
@@ -1467,12 +1480,12 @@ def _validate_delegated(kind: str, tree: dict) -> None:
 def prepare_policy_statements(
     sql: str,
     *,
-    project_id: str | None = None,
+    tenant_uuid: UUID | str | None = None,
     storage_s3_region: str | None = None,
 ):
     """Validate SQL and return parsed statements when Storage/Auth/Vector delegation applies."""
-    if project_id is not None:
-        vector_fdw_endpoint_url(project_id)
+    if tenant_uuid is not None:
+        vector_fdw_endpoint_url(tenant_uuid)
     if storage_s3_region is not None:
         normalize_storage_s3_region(storage_s3_region)
     try:
@@ -1571,13 +1584,12 @@ def rewrite_policy_statements(
     prepared,
     tenant_uuid,
     *,
-    project_id: str | None = None,
     key=None,
     role=None,
     now=None,
     storage_s3_region: str | None = None,
 ):
-    role = role or "tenant_meta_" + UUID(str(tenant_uuid)).hex
+    role = role or "tenant_meta_" + UUID(_canonical_tenant_uuid(tenant_uuid)).hex
     expires = int(time.time() if now is None else now) + 60
     storage_key: bytes | None = None
     fdw_key: bytes | None = None
@@ -1599,7 +1611,7 @@ def rewrite_policy_statements(
     def get_pinned_target() -> tuple[str, str]:
         nonlocal pinned_endpoint, pinned_region
         if pinned_endpoint is None:
-            pinned_endpoint = vector_fdw_endpoint_url(project_id)
+            pinned_endpoint = vector_fdw_endpoint_url(tenant_uuid)
         if pinned_region is None:
             pinned_region = normalize_storage_s3_region(storage_s3_region)
         return pinned_endpoint, pinned_region

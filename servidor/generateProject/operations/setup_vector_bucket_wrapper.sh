@@ -81,7 +81,7 @@ SERVER_NAME="${VECTOR_NAMES[1]:-}"
 
 ACCESS_SECRET_NAME="${WRAPPER_NAME}_vault_access_key_id"
 SECRET_SECRET_NAME="${WRAPPER_NAME}_vault_secret_access_key"
-VECTOR_ENDPOINT="http://supabase-nginx-${PROJECT_ID}:8081/vector"
+VECTOR_ENDPOINT="http://storage-vector-proxy:8081/fdw/${PROJECT_UUID}/vector"
 TENANT_META_ROLE="tenant_meta_${PROJECT_UUID//-/}"
 
 # Confirma que o bucket existe no tenant real antes de alterar o catalogo.

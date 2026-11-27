@@ -472,7 +472,10 @@ class GuardExclusionRuntimeTests(unittest.TestCase):
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         psql_text = self.psql_log.read_text(encoding="utf-8")
         self.assertIn(f"ENV SETUP_TENANT_META_ROLE={expected_role}", psql_text)
-        self.assertIn("ENV SETUP_ENDPOINT=http://supabase-nginx-demo_proj:8081/vector", psql_text)
+        self.assertIn(
+            f"ENV SETUP_ENDPOINT=http://storage-vector-proxy:8081/fdw/{tenant_uuid_lower}/vector",
+            psql_text,
+        )
         self.assertIn(
             "EXECUTE format('GRANT USAGE ON FOREIGN DATA WRAPPER %I TO %I', cfg.wrapper_name, cfg.tenant_meta_role);",
             psql_text,
@@ -525,7 +528,7 @@ class GuardExclusionRuntimeTests(unittest.TestCase):
         psql_text = self.psql_log.read_text(encoding="utf-8")
         self.assertIn(f"set_config('platform.vector_fdw_key','{expected_fdw_key}',true)", psql_text)
         self.assertIn(
-            "set_config('platform.vector_fdw_endpoint_url','http://supabase-nginx-demo_proj:8081/vector',true)",
+            f"set_config('platform.vector_fdw_endpoint_url','http://storage-vector-proxy:8081/fdw/{tenant_uuid}/vector',true)",
             psql_text,
         )
         self.assertIn("set_config('platform.vector_fdw_aws_region','sa-east-1',true)", psql_text)

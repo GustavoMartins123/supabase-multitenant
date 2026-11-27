@@ -148,18 +148,26 @@ Storage Vectors uses the same SigV4 pair as the S3 Protocol, but the signing
 service is `s3vectors`. The `pgvector` provider writes metadata and tables to
 the project's own database.
 
-Each project's FDW points to its Nginx:
+Each project's FDW points to the dedicated internal `storage-vector-proxy`
+service on the `supabase-storage-control` network:
 
 ```text
-http://supabase-nginx-<technical_name>:8081/vector
+http://storage-vector-proxy:8081/fdw/<tenant_uuid>/vector
 ```
 
-The wrapper signs this endpoint's `Host`. Nginx preserves this canonical host
-and injects the immutable UUID into `X-Forwarded-Host`. Display-name changes
-and public URL regeneration do not change the internal endpoint. Duplicate and
-restore reconcile `endpoint_url` with the destination's technical identity.
-Wrapper setup requires Wrappers >= 0.5.7 and imports the bucket as the remote
-schema in a transaction.
+The wrapper signs this endpoint's `Host` and `/fdw/<tenant_uuid>/vector/<Op>`
+path using `s3vectors` SigV4. `supabase-storage-vector-proxy` (a read-only,
+unprivileged Nginx container attached exclusively to `supabase-storage-control`)
+enforces `POST`-only canonical `s3vectors` SigV4 + `X-Amz-Date`, rewrites the
+upstream URI to `/vector/<Op>`, preserves `Host`, sets
+`X-Forwarded-Host: <tenant_uuid>.storage.internal` and
+`X-Forwarded-Prefix: /fdw/<tenant_uuid>`, strips `apikey` and `Forwarded`, and
+proxies exclusively to `http://storage:5000`. Because FDW traffic stays inside
+`supabase-storage-control`, `supabase-db` never attaches to
+`supabase-project-gateways`. Display-name changes and public URL regeneration
+do not change the internal endpoint. Duplicate and restore reconcile
+`endpoint_url` with the destination's tenant UUID. Wrapper setup requires
+Wrappers >= 0.5.7 and imports the bucket as the remote schema in a transaction.
 
 The physical name of a pgvector table includes a hash calculated by upstream
 from the bucket, tenant, and index. A `with-data` clone renames these tables in

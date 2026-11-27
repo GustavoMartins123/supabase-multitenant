@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LABEL = 'codex.p1.run'
 RESERVED_CONTAINERS = {
     'supabase-db', 'supabase-pooler', 'realtime-dev.supabase-realtime', 'supabase-edge-functions',
-    'supabase-storage-global', 'shared-storage-data-plane', 'supabase-imgproxy-global',
+    'supabase-storage-global', 'shared-storage-data-plane', 'supabase-storage-vector-proxy', 'supabase-imgproxy-global',
     'projects-api', 'key-authorizer', 'postgres-meta-global', 'control-plane-migrations',
     'supabase-analytics', 'supabase-vector-global', 'supabase-studio', 'nginx', 'authelia',
     'traefik-traefik-1', 'traefik-geoip-api-1', 'supabase-traefik-config-watcher', 'traefik-deny-service',
@@ -33,7 +33,8 @@ RESERVED_NETWORKS = {'rede-supabase', 'supabase-project-gateways', 'supabase-sto
 
 def archive(extra_sources: tuple[str, ...] = ()) -> bytes:
     allowed = ('servidor/generateProject/', 'servidor/volumes/db/', 'servidor/volumes/functions/',
-               'servidor/volumes/pooler/', 'servidor/volumes/storage-proxy/', 'servidor/postgres-meta/', 'servidor/api-internal/app/',
+               'servidor/volumes/pooler/', 'servidor/volumes/storage-proxy/', 'servidor/volumes/storage-vector-proxy/',
+               'servidor/postgres-meta/', 'servidor/api-internal/app/',
                'servidor/auth_template/', 'servidor/host-agent/hostagent/', 'servidor/traffic-redis/')
     exact = {'servidor/.env.example', 'servidor/docker-compose.yml', 'servidor/docker-compose-api.yml',
              'servidor/docker-compose.single-node.yml', 'servidor/docker-compose.split-node.yml',

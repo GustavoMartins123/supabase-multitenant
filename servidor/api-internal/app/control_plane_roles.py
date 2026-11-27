@@ -71,7 +71,7 @@ async def ensure_tenant_meta_roles(pool: asyncpg.Pool, *, admin_dsn: str, passwo
                         "set_config('platform.vector_fdw_aws_region',$4,true)",
                         tenant_storage_policy_key(row["tenant_uuid"], password).hex(),
                         tenant_vector_fdw_key(row["tenant_uuid"], password).hex(),
-                        storage_policies.vector_fdw_endpoint_url(row["name"]),
+                        storage_policies.vector_fdw_endpoint_url(row["tenant_uuid"]),
                         storage_s3_region,
                     )
                     await conn.execute(storage_guard_sql + "\n" + vector_fdw_guard_sql)

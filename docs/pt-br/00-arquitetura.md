@@ -463,7 +463,8 @@ Todos os componentes rodam no mesmo host, com o tráfego de inquilinos isolado f
 | Rede | Serviços conectados | Tipo |
 | --- | --- | --- |
 | `rede-supabase` | Control plane da plataforma (`supabase-db`, `projects-api`, `postgres-meta-global`, `edge-bundler`, `control-plane-migrations`, `traefik`, `realtime`, `supavisor`, `key-authorizer`, `template-service`, Studio) | bridge (`SUPABASE_NETWORK_SUBNET`) |
-| `supabase-project-gateways` | Gateways Nginx dos projetos, `traefik`, `realtime`, `supabase-pooler`, `key-authorizer`, `template-service` e `supabase-db` (somente saída HTTP do FDW de Storage Vectors para `:8081/vector`; conexões PostgreSQL de entrada vindas de `PROJECT_GATEWAYS_SUBNET` são rejeitadas no `pg_hba.conf`) | `internal: true` (`PROJECT_GATEWAYS_SUBNET`, padrão `172.54.0.0/23`) |
+| `supabase-project-gateways` | Gateways Nginx dos projetos, `traefik`, `realtime`, `supabase-pooler`, `key-authorizer` e `template-service` | `internal: true` (`PROJECT_GATEWAYS_SUBNET`, padrão `172.54.0.0/23`) |
+| `supabase-storage-control` | `supabase-db`, `supabase-pooler`, `supabase-storage-global` e `supabase-storage-vector-proxy` (proxy interno dedicado para o FDW de Storage Vectors em `:8081/fdw/<tenant_uuid>/vector`) | `internal: true` |
 | `supabase-internal-<projeto>` | Nginx, Auth e PostgREST do projeto | `internal: true` (`/28` em `172.52.0.0/16`) |
 | `supabase-project-egress` | Saída externa do Auth do projeto e do runtime de Edge Functions | bridge (`enable_icc: false`) |
 | `supabase-storage-gateways` | Gateways Nginx dos projetos e proxy de data plane do Storage | `internal: true` |

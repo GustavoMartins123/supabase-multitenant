@@ -463,14 +463,13 @@ async def proxy_project_meta(
                 storage_s3_region = storage_policies.resolve_storage_s3_region()
                 prepared = storage_policies.prepare_policy_statements(
                     query_body["query"],
-                    project_id=project_row["name"],
+                    tenant_uuid=project_row["tenant_uuid"],
                     storage_s3_region=storage_s3_region,
                 )
                 if prepared is not None:
                     query_body["query"] = storage_policies.rewrite_policy_statements(
                         prepared,
                         project_row["tenant_uuid"],
-                        project_id=project_row["name"],
                         storage_s3_region=storage_s3_region,
                     )
                     upstream_body = json.dumps(query_body).encode()

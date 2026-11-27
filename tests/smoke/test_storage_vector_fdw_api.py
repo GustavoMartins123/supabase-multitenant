@@ -36,7 +36,7 @@ from app.tenant_meta_identity import (
 
 TENANT = "11111111-1111-4111-8111-111111111111"
 PROJECT_NAME = "alpha_proj"
-EXPECTED_ENDPOINT = f"http://supabase-nginx-{PROJECT_NAME}:8081/vector"
+EXPECTED_ENDPOINT = f"http://storage-vector-proxy:8081/fdw/{TENANT}/vector"
 
 
 class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
@@ -51,13 +51,12 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
         ):
             with self.subTest(sql=sql):
                 prepared = storage_policies.prepare_policy_statements(
-                    sql, project_id=PROJECT_NAME
+                    sql, tenant_uuid=tenant_uuid
                 )
                 self.assertIsNotNone(prepared)
                 rewritten = storage_policies.rewrite_policy_statements(
                     prepared,
                     tenant_uuid,
-                    project_id=PROJECT_NAME,
                     key=b"a" * 32,
                     now=100,
                 )
@@ -72,7 +71,7 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
         )
         with self.assertRaises(storage_policies.StoragePolicyError):
             storage_policies.prepare_policy_statements(
-                "CREATE EXTENSION wrappers SCHEMA public;", project_id=PROJECT_NAME
+                "CREATE EXTENSION wrappers SCHEMA public;", tenant_uuid=tenant_uuid
             )
 
         # (b) & (c) CREATE / DROP FOREIGN DATA WRAPPER -> HMAC-signed studio_vector_fdw_guard calls
@@ -111,13 +110,12 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
         ):
             with self.subTest(sql=sql):
                 prepared = storage_policies.prepare_policy_statements(
-                    sql, project_id=PROJECT_NAME
+                    sql, tenant_uuid=tenant_uuid
                 )
                 self.assertIsNotNone(prepared)
                 rewritten = storage_policies.rewrite_policy_statements(
                     prepared,
                     tenant_uuid,
-                    project_id=PROJECT_NAME,
                     key=b"a" * 32,
                     now=100,
                 )
@@ -143,10 +141,9 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
         )
         rewritten_digit_server = storage_policies.rewrite_policy_statements(
             storage_policies.prepare_policy_statements(
-                digit_server_sql, project_id=PROJECT_NAME
+                digit_server_sql, tenant_uuid=tenant_uuid
             ),
             tenant_uuid,
-            project_id=PROJECT_NAME,
             storage_s3_region="us-east-1",
         )
         self.assertIn(
@@ -168,7 +165,7 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
                 storage_policies.StoragePolicyError
             ):
                 storage_policies.prepare_policy_statements(
-                    bad_fdw, project_id=PROJECT_NAME
+                    bad_fdw, tenant_uuid=tenant_uuid
                 )
 
         # (d) SSRF pinning on static CREATE/ALTER SERVER and Studio DO $$ execute format(...).
@@ -178,10 +175,9 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
         )
         rewritten = storage_policies.rewrite_policy_statements(
             storage_policies.prepare_policy_statements(
-                static_create, project_id=PROJECT_NAME, storage_s3_region="us-east-1"
+                static_create, tenant_uuid=tenant_uuid, storage_s3_region="us-east-1"
             ),
             tenant_uuid,
-            project_id=PROJECT_NAME,
             storage_s3_region="us-east-1",
         )
         self.assertIn(f"endpoint_url '{EXPECTED_ENDPOINT}'", rewritten)
@@ -194,22 +190,25 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
         )
         rewritten_omitted = storage_policies.rewrite_policy_statements(
             storage_policies.prepare_policy_statements(
-                omitted_endpoint, project_id=PROJECT_NAME
+                omitted_endpoint, tenant_uuid=tenant_uuid
             ),
             tenant_uuid,
-            project_id=PROJECT_NAME,
             storage_s3_region="sa-east-1",
         )
         self.assertIn(f"endpoint_url '{EXPECTED_ENDPOINT}'", rewritten_omitted)
         self.assertIn("aws_region 'sa-east-1'", rewritten_omitted)
 
-        # Fail closed when rewriting a server statement without project_id.
-        with self.assertRaises(storage_policies.StoragePolicyError):
-            storage_policies.rewrite_policy_statements(
-                storage_policies.prepare_policy_statements(omitted_endpoint),
-                tenant_uuid,
-                storage_s3_region="us-east-1",
-            )
+        # Fail closed when rewriting a server statement with missing/non-canonical tenant_uuid.
+        for bad_tenant in (None, "", "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", "not-a-uuid"):
+            with self.subTest(bad_tenant=bad_tenant), self.assertRaises(
+                storage_policies.StoragePolicyError
+            ):
+                storage_policies.rewrite_policy_statements(
+                    storage_policies.prepare_policy_statements(omitted_endpoint),
+                    bad_tenant,
+                    role=f"tenant_meta_{tenant_uuid.hex}",
+                    storage_s3_region="us-east-1",
+                )
 
         alter_srv = (
             "ALTER SERVER my_docs_fdw_server OPTIONS "
@@ -217,10 +216,9 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
         )
         rewritten_alter = storage_policies.rewrite_policy_statements(
             storage_policies.prepare_policy_statements(
-                alter_srv, project_id=PROJECT_NAME
+                alter_srv, tenant_uuid=tenant_uuid
             ),
             tenant_uuid,
-            project_id=PROJECT_NAME,
             storage_s3_region="us-east-1",
         )
         self.assertIn(f"SET endpoint_url '{EXPECTED_ENDPOINT}'", rewritten_alter)
@@ -251,7 +249,7 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
                 storage_policies.StoragePolicyError
             ):
                 storage_policies.prepare_policy_statements(
-                    bad_ssrf, project_id=PROJECT_NAME
+                    bad_ssrf, tenant_uuid=tenant_uuid
                 )
 
         # (e) CREATE SCHEMA AUTHORIZATION postgres -> strips AUTHORIZATION postgres.
@@ -264,10 +262,9 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
         ):
             rewritten_schema = storage_policies.rewrite_policy_statements(
                 storage_policies.prepare_policy_statements(
-                    sql, project_id=PROJECT_NAME
+                    sql, tenant_uuid=tenant_uuid
                 ),
                 tenant_uuid,
-                project_id=PROJECT_NAME,
             )
             self.assertEqual(rewritten_schema, expected_sql)
 
@@ -277,9 +274,8 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
             "INTO my_vectors OPTIONS (bucket_name 'my-docs', strict 'true');"
         )
         rewritten_ei = storage_policies.rewrite_policy_statements(
-            storage_policies.prepare_policy_statements(ei_sql, project_id=PROJECT_NAME),
+            storage_policies.prepare_policy_statements(ei_sql, tenant_uuid=tenant_uuid),
             tenant_uuid,
-            project_id=PROJECT_NAME,
         )
         self.assertEqual(
             rewritten_ei,
@@ -291,10 +287,9 @@ class StorageVectorFdwSqlRewriteTests(unittest.TestCase):
         )
         rewritten_quoted = storage_policies.rewrite_policy_statements(
             storage_policies.prepare_policy_statements(
-                ei_quoted_bucket, project_id=PROJECT_NAME
+                ei_quoted_bucket, tenant_uuid=tenant_uuid
             ),
             tenant_uuid,
-            project_id=PROJECT_NAME,
         )
         self.assertEqual(
             rewritten_quoted,
@@ -335,14 +330,13 @@ begin
 end $$;
 commit;"""
         prepared_tf = storage_policies.prepare_policy_statements(
-            studio_tf_sql, project_id=PROJECT_NAME, storage_s3_region="us-east-1"
+            studio_tf_sql, tenant_uuid=tenant_uuid, storage_s3_region="us-east-1"
         )
         self.assertIsNotNone(prepared_tf)
         self.assertEqual(sum(delegated for _, delegated in prepared_tf), 2)
         rewritten_tf = storage_policies.rewrite_policy_statements(
             prepared_tf,
             tenant_uuid,
-            project_id=PROJECT_NAME,
             key=b"a" * 32,
             now=100,
             storage_s3_region="us-east-1",
@@ -379,10 +373,9 @@ BEGIN
 END $$;"""
         rewritten_fmt_inj = storage_policies.rewrite_policy_statements(
             storage_policies.prepare_policy_statements(
-                fmt_inj_sql, project_id=PROJECT_NAME, storage_s3_region="us-east-1"
+                fmt_inj_sql, tenant_uuid=tenant_uuid, storage_s3_region="us-east-1"
             ),
             tenant_uuid,
-            project_id=PROJECT_NAME,
             storage_s3_region="us-east-1",
         )
         self.assertIn('"a%%1$s"', rewritten_fmt_inj)
@@ -394,7 +387,7 @@ END $$;"""
         self.assertNotIn('"opt%1$s"', rewritten_fmt_inj)
         self.assertIn(EXPECTED_ENDPOINT, rewritten_fmt_inj)
 
-    def test_region_and_project_id_validation_and_root_env_fallback(self) -> None:
+    def test_region_and_tenant_uuid_validation_and_root_env_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root_env = Path(tmpdir) / ".env"
             root_env.write_text("STORAGE_S3_REGION=sa-east-1\n", encoding="utf-8")
@@ -429,12 +422,29 @@ END $$;"""
                     "us-east-1",
                 )
 
-        # Invalid project_id or region fails closed.
-        for bad_project in ("", "ab", "UPPER", "../evil", "alpha-dash", "alpha:8081/x"):
-            with self.subTest(bad_project=bad_project), self.assertRaises(
+        # Invalid tenant_uuid or region fails closed.
+        for bad_tenant in (
+            None,
+            "",
+            "ab",
+            "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE",
+            TENANT.replace("-", ""),
+            f" {TENANT}",
+            f"{TENANT} ",
+            "../evil",
+            "alpha_proj",
+            "11111111-1111-4111-8111-11111111111g",
+        ):
+            with self.subTest(bad_tenant=bad_tenant), self.assertRaises(
                 storage_policies.StoragePolicyError
             ):
-                storage_policies.vector_fdw_endpoint_url(bad_project)
+                storage_policies.vector_fdw_endpoint_url(bad_tenant)
+
+        self.assertEqual(storage_policies.vector_fdw_endpoint_url(TENANT), EXPECTED_ENDPOINT)
+        self.assertEqual(
+            storage_policies.vector_fdw_endpoint_url(uuid.UUID(TENANT)),
+            EXPECTED_ENDPOINT,
+        )
 
         for bad_region in ("-bad", "us_east_1", "us-east-1;drop", "a" * 64):
             with self.subTest(bad_region=bad_region), self.assertRaises(
@@ -666,7 +676,14 @@ class VectorFdwProvisioningAndSqlContractsTests(unittest.IsolatedAsyncioTestCase
             guard_sql,
         )
         self.assertIn("^tenant_meta_[0-9a-f]{32}$", guard_sql)
-        self.assertIn("^http://supabase-nginx-[a-z_][a-z0-9_]{2,39}:8081/vector$", guard_sql)
+        self.assertIn(
+            "^http://storage-vector-proxy:8081/fdw/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/vector$",
+            guard_sql,
+        )
+        self.assertIn(
+            "S3 Vectors FDW pinned endpoint URL does not match tenant identity",
+            guard_sql,
+        )
         self.assertIn("^[a-z0-9_]{1,63}$", guard_sql)
         self.assertIn("set_config('platform.vector_fdw_key', '', false)", guard_sql)
         self.assertIn("set_config('platform.vector_fdw_endpoint_url', '', false)", guard_sql)
@@ -736,9 +753,9 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
             CREATE FUNCTION extensions.s3_vectors_fdw_handler() RETURNS fdw_handler LANGUAGE internal IMMUTABLE STRICT AS 'postgresql_fdw_validator';
             CREATE FUNCTION extensions.s3_vectors_fdw_validator(text[], oid) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END; $$;
             CREATE FOREIGN DATA WRAPPER cli_vec_fdw HANDLER extensions.s3_vectors_fdw_handler VALIDATOR extensions.s3_vectors_fdw_validator;
-            CREATE SERVER cli_vec_srv FOREIGN DATA WRAPPER cli_vec_fdw OPTIONS (aws_region 'us-east-1', endpoint_url 'http://supabase-nginx-"""
-            + self.project["name"]
-            + """:8081/vector');
+            CREATE SERVER cli_vec_srv FOREIGN DATA WRAPPER cli_vec_fdw OPTIONS (aws_region 'us-east-1', endpoint_url 'http://storage-vector-proxy:8081/fdw/"""
+            + str(self.project["tenant_uuid"])
+            + """/vector');
             CREATE FOREIGN DATA WRAPPER other_preexisting_fdw;
             CREATE SERVER other_preexisting_srv FOREIGN DATA WRAPPER other_preexisting_fdw;
             CREATE SCHEMA vault;
@@ -798,6 +815,25 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_guard_enforces_hmac_handler_event_trigger_vault_and_clone_rebind_live(
         self,
     ) -> None:
+        # Verify provisioning rejects a cross-tenant endpoint_url mismatch against tenant_meta_<hex>.
+        guard_sql = (API_ROOT / "app/studio_vector_fdw_guard.sql").read_text(encoding="utf-8")
+        other_uuid = uuid.uuid4()
+        while other_uuid == self.project["tenant_uuid"]:
+            other_uuid = uuid.uuid4()
+        with self.assertRaisesRegex(asyncpg.RaiseError, "does not match tenant identity"):
+            async with self.owner.transaction():
+                await self.owner.execute(
+                    "SELECT set_config('platform.meta_role',$1,true),"
+                    "set_config('platform.vector_fdw_key',$2,true),"
+                    "set_config('platform.vector_fdw_endpoint_url',$3,true),"
+                    "set_config('platform.vector_fdw_aws_region',$4,true)",
+                    self.role,
+                    tenant_vector_fdw_key(self.project["tenant_uuid"], self.master).hex(),
+                    storage_policies.vector_fdw_endpoint_url(other_uuid),
+                    "us-east-1",
+                )
+                await self.owner.execute(guard_sql)
+
         # Verify ONLY 2 callable SECURITY DEFINER functions (+ 1 event trigger function) exist in studio_vector_fdw_guard.
         callable_secdef_fns = await self.owner.fetch(
             """SELECT p.proname
@@ -916,10 +952,9 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
         ensure_digit_sql = storage_policies.rewrite_policy_statements(
             storage_policies.prepare_policy_statements(
                 'CREATE FOREIGN DATA WRAPPER "2026_docs_fdw" HANDLER s3_vectors_fdw_handler VALIDATOR s3_vectors_fdw_validator;',
-                project_id=self.project["name"],
+                tenant_uuid=self.project["tenant_uuid"],
             ),
             self.project["tenant_uuid"],
-            project_id=self.project["name"],
         )
         await self.tenant.execute(ensure_digit_sql)
 
@@ -935,10 +970,9 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     v, 'http://evil'
                   );
                 END $$;""",
-                project_id=self.project["name"],
+                tenant_uuid=self.project["tenant_uuid"],
             ),
             self.project["tenant_uuid"],
-            project_id=self.project["name"],
         )
         await self.tenant.execute(fmt_smuggle_sql)
         self.assertEqual(
@@ -951,7 +985,7 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
             "SELECT srvoptions FROM pg_foreign_server WHERE srvname = 'srv_%1$s'"
         )
         self.assertIn(
-            f"endpoint_url=http://supabase-nginx-{self.project['name']}:8081/vector",
+            f"endpoint_url=http://storage-vector-proxy:8081/fdw/{self.project['tenant_uuid']}/vector",
             smuggled_opts,
         )
         self.assertNotIn("endpoint_url=http://storage:5001", smuggled_opts)
@@ -975,10 +1009,9 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
             storage_policies.prepare_policy_statements(
                 'CREATE SERVER "2026_docs_fdw_server" FOREIGN DATA WRAPPER "2026_docs_fdw" '
                 "OPTIONS (aws_region 'local', endpoint_url 'https://evil.example');",
-                project_id=self.project["name"],
+                tenant_uuid=self.project["tenant_uuid"],
             ),
             self.project["tenant_uuid"],
-            project_id=self.project["name"],
         )
         await self.tenant.execute(valid_srv_sql)
         for hijack_sql in (
@@ -996,10 +1029,9 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
         drop_other_sql = storage_policies.rewrite_policy_statements(
             storage_policies.prepare_policy_statements(
                 "DROP FOREIGN DATA WRAPPER IF EXISTS other_system_fdw CASCADE;",
-                project_id=self.project["name"],
+                tenant_uuid=self.project["tenant_uuid"],
             ),
             self.project["tenant_uuid"],
-            project_id=self.project["name"],
         )
         with self.assertRaises(asyncpg.InsufficientPrivilegeError):
             await self.tenant.execute(drop_other_sql)
@@ -1013,10 +1045,9 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
         drop_vec_sql = storage_policies.rewrite_policy_statements(
             storage_policies.prepare_policy_statements(
                 'DROP FOREIGN DATA WRAPPER IF EXISTS "2026_docs_fdw" CASCADE;',
-                project_id=self.project["name"],
+                tenant_uuid=self.project["tenant_uuid"],
             ),
             self.project["tenant_uuid"],
-            project_id=self.project["name"],
         )
         await self.tenant.execute(drop_vec_sql)
         self.assertEqual(
@@ -1057,7 +1088,7 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     await clone_owner.fetchval(
                         "SELECT endpoint_url FROM studio_vector_fdw_guard.server_policy"
                     ),
-                    f"http://supabase-nginx-{clone['name']}:8081/vector",
+                    f"http://storage-vector-proxy:8081/fdw/{clone['tenant_uuid']}/vector",
                 )
                 self.assertFalse(
                     await clone_owner.fetchval(

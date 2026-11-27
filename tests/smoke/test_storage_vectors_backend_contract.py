@@ -34,6 +34,10 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
         self.assertIn('proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";', vector)
         data_plane = (ROOT / "servidor/volumes/storage-proxy/nginx.conf").read_text(encoding="utf-8")
         self.assertIn("proxy_set_header Host $http_host;", data_plane)
+        vector_proxy = (ROOT / "servidor/volumes/storage-vector-proxy/nginx.conf").read_text(encoding="utf-8")
+        self.assertIn("proxy_set_header Host $http_host;", vector_proxy)
+        self.assertIn('proxy_set_header X-Forwarded-Host "$fdw_tenant_uuid.storage.internal";', vector_proxy)
+        self.assertIn('proxy_set_header X-Forwarded-Prefix "/fdw/$fdw_tenant_uuid";', vector_proxy)
 
     def test_project_nginx_enforces_strict_vector_sigv4_method_path_and_cors(self) -> None:
         gateway = (ROOT / "servidor/generateProject/nginxtemplate").read_text(encoding="utf-8")
@@ -194,6 +198,7 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
             migration.count('ensure_project_vector_database_prerequisites "_supabase_$project"'),
             2,
         )
+        self.assertIn("up -d db supavisor imgproxy storage storage-data-plane storage-vector-proxy", migration)
 
     def test_generate_duplicate_and_rename_share_the_vector_contract(self) -> None:
         library = VECTOR_LIBRARY.read_text(encoding="utf-8")

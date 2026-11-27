@@ -197,7 +197,8 @@ local ok, err = xpcall(function()
         .. "VALIDATOR s3_vectors_fdw_validator OPTIONS (endpoint_url 'https://untrusted.example/vector')"
     local echo = request(base .. "/query", cjson.encode({ query = wrapper }))
     local query = assert(cjson.decode(echo.body)).query
-    assert(query:find("http://supabase-nginx-technical_project:8081/vector", 1, true))
+    assert(query:find("http://storage-vector-proxy:8081/fdw/22222222-2222-4222-8222-222222222222/vector", 1, true))
+    assert(not query:find("11111111-1111-4111-8111-111111111111", 1, true))
     assert(not query:find(ref, 1, true) and not query:find("untrusted.example", 1, true))
     assert(echo.target == "/api/projects/" .. ref .. "/meta/query")
 
@@ -215,7 +216,8 @@ local ok, err = xpcall(function()
         .. "commit;"
     echo = request(base .. "/query", cjson.encode({ query = studio_v20_wrapper }))
     local v20_query = assert(cjson.decode(echo.body)).query
-    assert(v20_query:find("'http://supabase-nginx-technical_project:8081/vector'", 1, true), v20_query)
+    assert(v20_query:find("'http://storage-vector-proxy:8081/fdw/22222222-2222-4222-8222-222222222222/vector'", 1, true), v20_query)
+    assert(not v20_query:find("11111111-1111-4111-8111-111111111111", 1, true), v20_query)
     assert(v20_query:find("'" .. expected_region .. "'", 1, true), v20_query)
     assert(v20_query:find("'my_vectors'", 1, true), v20_query)
     assert(not v20_query:find("untrusted.example", 1, true))
