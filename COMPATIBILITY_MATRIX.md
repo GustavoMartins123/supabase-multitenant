@@ -23,7 +23,7 @@ tested against. One row per moving part; the platform row is the canonical
 
 | Component | Pinned version | Where the pin lives | Patched here |
 | --- | --- | --- | --- |
-| Supabase Studio | commit `20290c71bdc48bef1720bfe7d292f3b9e6154f7d` (`multitenant-studio:20290c7-context-v20`, `next@16.4.6`, `sharp@0.35.5`, `node:22.23.5-trixie-slim`, non-root `node`) | `studio/docker-compose.yml`, `studio/studio-slug/Dockerfile` | yes — `studio-project-context.patch`, `studio-edge-functions.patch`, `studio-security-deps.patch` |
+| Supabase Studio | commit `20290c71bdc48bef1720bfe7d292f3b9e6154f7d` (`multitenant-studio:20290c7-context-v21`, `next@16.4.6`, `sharp@0.35.5`, `node:22.23.5-trixie-slim`, non-root `node`) | `studio/docker-compose.yml`, `studio/studio-slug/Dockerfile` | yes — `studio-project-context.patch`, `studio-edge-functions.patch`, `studio-security-deps.patch` |
 | Postgres (projects) | `supabase/postgres:15.14.1.142` | `servidor/volumes/db/Dockerfile` | no |
 | Realtime | `v2.112.3` | `servidor/volumes/realtime/Dockerfile` (`REALTIME_VER`) | yes — 3 `.ex` + 1 `.exs` |
 | Realtime `pg_delta` | commit `d706336a6772318e92db419eda5a5ea51123510e` | `servidor/volumes/realtime/Dockerfile` (`PG_DELTA_COMMIT`) | no |

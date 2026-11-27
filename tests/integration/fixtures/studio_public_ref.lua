@@ -117,7 +117,7 @@ http {
                 end
                 ngx.status = 200
                 ngx.header["Content-Type"] = "application/json; charset=utf-8"
-                ngx.say('{"is_cli_mode":true}')
+                ngx.say('{"is_cli_mode":false}')
                 return ngx.exit(200)
             }
         }
@@ -282,7 +282,7 @@ local ok, err = xpcall(function()
         method = "GET",
     }))
     assert(dm_get.status == 200, tostring(dm_get.status) .. ": " .. dm_get.body)
-    assert(cjson.decode(dm_get.body).is_cli_mode == true)
+    assert(cjson.decode(dm_get.body).is_cli_mode == false)
     assert(dm_get.headers["Cache-Control"] == "no-store")
     assert(dm_get.headers["X-Content-Type-Options"] == "nosniff")
     count = count + 1
